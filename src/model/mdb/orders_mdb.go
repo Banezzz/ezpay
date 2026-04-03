@@ -17,6 +17,7 @@ type Orders struct {
 	ActualAmount       float64 `gorm:"column:actual_amount" json:"actual_amount"`
 	ReceiveAddress     string  `gorm:"column:receive_address" json:"receive_address"`
 	Token              string  `gorm:"column:token" json:"token"`
+	Network            string  `gorm:"column:network" json:"network"`
 	Status             int     `gorm:"column:status;default:1" json:"status"`
 	NotifyUrl          string  `gorm:"column:notify_url" json:"notify_url"`
 	RedirectUrl        string  `gorm:"column:redirect_url" json:"redirect_url"`

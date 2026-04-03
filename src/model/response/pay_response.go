@@ -2,11 +2,15 @@ package response
 
 type CheckoutCounterResponse struct {
 	TradeId        string  `json:"trade_id"`        //  epusdt订单号
-	ActualAmount   float64 `json:"actual_amount"`   //  订单实际需要支付的金额，保留4位小数
-	ReceiveAddress string  `json:"receive_address"` //  收款钱包地址
+	Amount         float64 `json:"amount"`          //  订单金额，保留4位小数 法币金额
+	ActualAmount   float64 `json:"actual_amount"`   //  订单实际需要支付的金额，保留4位小数 加密货币金额
 	Token          string  `json:"token"`           //  所属币种 TRX USDT......
+	Currency       string  `json:"currency"`        //  法币币种 CNY USD ...
+	ReceiveAddress string  `json:"receive_address"` //  收款钱包地址
+	Network        string  `json:"network"`         //  网络 TRON ETH ...
 	ExpirationTime int64   `json:"expiration_time"` // 过期时间 时间戳
 	RedirectUrl    string  `json:"redirect_url"`
+	CreatedAt      int64   `json:"created_at"` // 订单创建时间 时间戳
 }
 
 type CheckStatusResponse struct {

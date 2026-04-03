@@ -11,23 +11,31 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// LegecyCheckoutCounter 收银台
-func (c *BaseCommController) LegecyCheckoutCounter(ctx echo.Context) (err error) {
+// CheckoutCounter 收银台
+func (c *BaseCommController) CheckoutCounter(ctx echo.Context) (err error) {
 	tradeId := ctx.Param("trade_id")
 	resp, err := service.GetCheckoutCounterByTradeId(tradeId)
 	if err != nil {
+		if err == service.ErrOrder {
+			tmpl, err := template.ParseFiles(filepath.Join(config.StaticFilePath, "index.html"))
+			if err != nil {
+				return ctx.String(http.StatusOK, err.Error())
+			}
+			emptyResp := response.CheckoutCounterResponse{}
+			return tmpl.Execute(ctx.Response(), emptyResp)
+		}
 		return ctx.String(http.StatusOK, err.Error())
 	}
 	tmpl, err := template.ParseFiles(filepath.Join(config.StaticFilePath, "index.html"))
 	if err != nil {
 		return ctx.String(http.StatusOK, err.Error())
 	}
-	resp.Token = resp.ReceiveAddress // only for legacy checkout counter, token is the receive address
+	resp.Network = "TRON"
 	return tmpl.Execute(ctx.Response(), resp)
 }
 
-// LegecyCheckStatus 支付状态检测
-func (c *BaseCommController) LegecyCheckStatus(ctx echo.Context) (err error) {
+// CheckStatus 支付状态检测
+func (c *BaseCommController) CheckStatus(ctx echo.Context) (err error) {
 	tradeId := ctx.Param("trade_id")
 	order, err := service.GetOrderInfoByTradeId(tradeId)
 	if err != nil {
