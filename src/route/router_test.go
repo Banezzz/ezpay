@@ -52,11 +52,30 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	}
 
 	// ensure tables exist (MdbTableInit uses sync.Once, so migrate directly)
-	dao.Mdb.AutoMigrate(&mdb.Orders{}, &mdb.WalletAddress{})
+	dao.Mdb.AutoMigrate(&mdb.Orders{}, &mdb.WalletAddress{}, &mdb.SupportedAsset{})
 
 	// seed wallet addresses
 	dao.Mdb.Create(&mdb.WalletAddress{Network: mdb.NetworkTron, Address: "TTestTronAddress001", Status: mdb.TokenStatusEnable})
 	dao.Mdb.Create(&mdb.WalletAddress{Network: mdb.NetworkSolana, Address: "SolTestAddress001", Status: mdb.TokenStatusEnable})
+	// seed supported assets if empty
+	var supportCnt int64
+	dao.Mdb.Model(&mdb.SupportedAsset{}).Count(&supportCnt)
+	if supportCnt == 0 {
+		dao.Mdb.Create(&[]mdb.SupportedAsset{
+			{Network: mdb.NetworkTron, Token: "TRX", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkTron, Token: "USDT", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkSolana, Token: "SOL", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkSolana, Token: "USDT", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkSolana, Token: "USDC", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkEthereum, Token: "USDT", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkEthereum, Token: "USDC", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkBsc, Token: "USDT", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkBsc, Token: "USDC", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkPolygon, Token: "USDT", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkPolygon, Token: "USDC", Status: mdb.TokenStatusEnable},
+			{Network: mdb.NetworkPlasma, Token: "USDT", Status: mdb.TokenStatusEnable},
+		})
+	}
 
 	e := echo.New()
 	RegisterRoute(e)
@@ -205,6 +224,104 @@ func parseResp(t *testing.T, rec *httptest.ResponseRecorder) map[string]interfac
 		t.Fatalf("unmarshal: %v", err)
 	}
 	return resp
+}
+
+func TestGetSupportedAssetsPublic(t *testing.T) {
+	e := setupTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/supported-assets", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	resp := parseResp(t, rec)
+	if resp["status_code"].(float64) != 200 {
+		t.Fatalf("expected status_code=200, got %v", resp["status_code"])
+	}
+
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected object data, got %T", resp["data"])
+	}
+	supports, ok := data["supports"].([]interface{})
+	if !ok {
+		t.Fatalf("expected supports array, got %T", data["supports"])
+	}
+	if len(supports) < 6 {
+		t.Fatalf("expected >= 6 network supports, got %d", len(supports))
+	}
+
+	seen := map[string]bool{}
+	for _, item := range supports {
+		row := item.(map[string]interface{})
+		network := row["network"].(string)
+		seen[network] = true
+	}
+	for _, n := range []string{"tron", "solana", "eth", "bsc", "polygon", "plasma"} {
+		if !seen[n] {
+			t.Fatalf("missing network support: %s", n)
+		}
+	}
+}
+
+func TestSupportedAssetCRUD(t *testing.T) {
+	e := setupTestEnv(t)
+
+	// public query list (no auth)
+	req := httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/supported-assets/records", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	resp := parseResp(t, rec)
+	if resp["status_code"].(float64) != 200 {
+		t.Fatalf("public list failed: %v", resp)
+	}
+
+	// create requires auth
+	rec = doPostWithToken(e, "/payments/gmpay/v1/supported-assets/add", map[string]interface{}{
+		"network": "arb",
+		"token":   "usdt",
+		"status":  1,
+	})
+	resp = parseResp(t, rec)
+	if resp["status_code"].(float64) != 200 {
+		t.Fatalf("add supported asset failed: %v", resp)
+	}
+	created := resp["data"].(map[string]interface{})
+	assetID := fmt.Sprintf("%.0f", created["id"].(float64))
+
+	// get by id is public
+	req = httptest.NewRequest(http.MethodGet, "/payments/gmpay/v1/supported-assets/"+assetID, nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	resp = parseResp(t, rec)
+	if resp["status_code"].(float64) != 200 {
+		t.Fatalf("public get by id failed: %v", resp)
+	}
+
+	// update requires auth
+	rec = doPostWithToken(e, "/payments/gmpay/v1/supported-assets/"+assetID+"/update", map[string]interface{}{
+		"network": "arbitrum",
+		"token":   "usdc",
+		"status":  1,
+	})
+	resp = parseResp(t, rec)
+	if resp["status_code"].(float64) != 200 {
+		t.Fatalf("update supported asset failed: %v", resp)
+	}
+	updated := resp["data"].(map[string]interface{})
+	if updated["network"] != "arbitrum" || updated["token"] != "USDC" {
+		t.Fatalf("unexpected updated data: %v", updated)
+	}
+
+	// delete requires auth
+	rec = doPostWithToken(e, "/payments/gmpay/v1/supported-assets/"+assetID+"/delete", nil)
+	resp = parseResp(t, rec)
+	if resp["status_code"].(float64) != 200 {
+		t.Fatalf("delete supported asset failed: %v", resp)
+	}
 }
 
 // TestWalletAddAndList tests adding wallets via API and listing them.

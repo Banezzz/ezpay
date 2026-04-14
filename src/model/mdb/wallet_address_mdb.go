@@ -9,6 +9,9 @@ const (
 	NetworkTron     = "tron"
 	NetworkSolana   = "solana"
 	NetworkEthereum = "ethereum"
+	NetworkBsc      = "bsc"
+	NetworkPolygon  = "polygon"
+	NetworkPlasma   = "plasma"
 )
 
 type WalletAddress struct {

@@ -8,6 +8,9 @@ import (
 func Start() {
 	log.Sugar.Info("[task] Starting task scheduler...")
 	go StartEthereumWebSocketListener()
+	go StartBscWebSocketListener()
+	//go StartPolygonWebSocketListener()
+	//go StartPlasmaWebSocketListener()
 
 	c := cron.New()
 	// trc20钱包监听

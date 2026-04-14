@@ -64,6 +64,12 @@ func RegisterRoute(e *echo.Echo) {
 	// gmpay v1 routes
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
 	gmpayV1.POST("/order/create-transaction", comm.Ctrl.CreateTransaction, middleware.CheckApiSign())
+	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
+	gmpayV1.GET("/supported-assets/records", comm.Ctrl.ListSupportedAssetRecords)
+	gmpayV1.GET("/supported-assets/:id", comm.Ctrl.GetSupportedAsset)
+	gmpayV1.POST("/supported-assets/add", comm.Ctrl.AddSupportedAsset, middleware.CheckApiToken())
+	gmpayV1.POST("/supported-assets/:id/update", comm.Ctrl.UpdateSupportedAsset, middleware.CheckApiToken())
+	gmpayV1.POST("/supported-assets/:id/delete", comm.Ctrl.DeleteSupportedAsset, middleware.CheckApiToken())
 
 	// wallet management routes
 	walletV1 := gmpayV1.Group("/wallet", middleware.CheckApiToken())

@@ -16,6 +16,8 @@ var Errno = map[int]string{
 	10011: "exceeded maximum sub-order limit",
 	10012: "cannot switch network on a sub-order",
 	10013: "order is not awaiting payment",
+	10014: "supported asset already exists",
+	10015: "supported asset not found",
 }
 
 var (
@@ -34,6 +36,8 @@ var (
 	SubOrderLimitExceeded      = Err(10011)
 	CannotSwitchSubOrder       = Err(10012)
 	OrderNotWaitPay            = Err(10013)
+	SupportedAssetAlreadyExists = Err(10014)
+	SupportedAssetNotFound      = Err(10015)
 )
 
 type RspError struct {

@@ -2,7 +2,6 @@ package task
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"strings"
 	"sync/atomic"
@@ -38,7 +37,7 @@ var ethWatchedRecipients atomic.Pointer[ethRecipientSnapshot]
 func StartEthereumWebSocketListener() {
 	wallets, err := data.GetAvailableWalletAddressByNetwork(mdb.NetworkEthereum)
 	if err != nil {
-		log.Sugar.Fatalf("Failed to get wallet addresses: %v", err)
+		log.Sugar.Errorf("Failed to get wallet addresses: %v", err)
 		return
 	}
 	StoreEthRecipientsFromWallets(wallets)
@@ -55,16 +54,6 @@ func StartEthereumWebSocketListener() {
 		}
 	}()
 	wsURL := "wss://ethereum.publicnode.com"
-
-	client, err := ethclient.Dial(wsURL)
-	if err != nil {
-		log.Sugar.Fatal("连接失败:", err)
-	}
-
-	// 创建日志通道
-	logsCh := make(chan types.Log)
-
-	// 订阅条件
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{
 			usdtContract,
@@ -73,59 +62,35 @@ func StartEthereumWebSocketListener() {
 		Topics: [][]common.Hash{},
 	}
 
-	// 订阅日志（核心）
-	sub, err := client.SubscribeFilterLogs(context.Background(), query, logsCh)
-	if err != nil {
-		log.Sugar.Fatal("订阅失败:", err)
-	}
-
-	fmt.Println("🚀 开始监听 USDT / USDC 收款...")
-
-	for {
-		select {
-		case err := <-sub.Err():
-			log.Sugar.Fatal("订阅错误:", err)
-
-		case vLog := <-logsCh:
-
-			// topics:
-			// [0] Transfer event
-			// [1] from
-			// [2] to
-			if len(vLog.Topics) < 3 {
-				continue
-			}
-
-			event := vLog.Topics[0].String()
-			if event != transferEventHash.String() {
-				continue
-			}
-
-			// value from data
-			amount := new(big.Int).SetBytes(vLog.Data)
-
-
-			if event != transferEventHash.String() {
-				continue
-			}
-			toAddr := common.HexToAddress(vLog.Topics[2].Hex())
-
-			if !isWatchedEthRecipient(toAddr) {
-				continue
-			}
-
-			var blockTsMs int64
-			header, err := client.HeaderByNumber(context.Background(), big.NewInt(int64(vLog.BlockNumber)))
-			if err != nil {
-				log.Sugar.Warnf("[ETH-WS] HeaderByNumber block=%d: %v, using local time", vLog.BlockNumber, err)
-				blockTsMs = time.Now().UnixMilli()
-			} else {
-				blockTsMs = int64(header.Time) * 1000
-			}
-
-			service.TryProcessEthereumERC20Transfer(vLog.Address, toAddr, amount, vLog.TxHash.Hex(), blockTsMs)
+	runEvmWsLogListener("[ETH-WS]", wsURL, query, func(client *ethclient.Client, vLog types.Log) {
+		if len(vLog.Topics) < 3 {
+			return
 		}
-	}
+
+		event := vLog.Topics[0].String()
+		if event != transferEventHash.String() {
+			return
+		}
+
+		amount := new(big.Int).SetBytes(vLog.Data)
+
+		toAddr := common.HexToAddress(vLog.Topics[2].Hex())
+
+		if !isWatchedEthRecipient(toAddr) {
+			return
+		}
+
+		var blockTsMs int64
+		header, err := client.HeaderByNumber(context.Background(), big.NewInt(int64(vLog.BlockNumber)))
+		if err != nil {
+			log.Sugar.Warnf("[ETH-WS] HeaderByNumber block=%d: %v, using local time", vLog.BlockNumber, err)
+			blockTsMs = time.Now().UnixMilli()
+		} else {
+			blockTsMs = int64(header.Time) * 1000
+		}
+
+		service.TryProcessEvmERC20Transfer(mdb.NetworkEthereum, vLog.Address, toAddr, amount, vLog.TxHash.Hex(), blockTsMs)
+	})
 }
 
 func StoreEthRecipientsFromWallets(wallets []mdb.WalletAddress) int {
