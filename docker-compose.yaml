@@ -9,7 +9,7 @@ services:
       - ./docker/epusdt.env:/app/.env:ro
       - epusdt-data:/app/data
     ports:
-      - "50506:8000"
+      - "127.0.0.1:50506:8000"
 
 volumes:
   epusdt-data:
