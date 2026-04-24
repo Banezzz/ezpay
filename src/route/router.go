@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/controller/admin"
 	"github.com/GMWalletApp/epusdt/controller/comm"
 	"github.com/GMWalletApp/epusdt/middleware"
@@ -160,11 +161,13 @@ func RegisterRoute(e *echo.Echo) {
 // registerAdminRoutes wires the management console API surface under
 // /admin/api/v1. Everything except /auth/login requires a valid JWT.
 func registerAdminRoutes(e *echo.Echo) {
-	// CORS for the management console. The admin SPA is commonly served
-	// from a different origin (local dev, CDN, etc.), so allow any origin
-	// but require explicit echoing — browsers refuse wildcard + credentials.
+	// CORS for the management console. Default to the configured app_uri
+	// origin; cross-origin admin SPAs must be explicitly allowed via
+	// admin_cors_origins / ADMIN_CORS_ORIGINS.
 	adminCORS := echoMiddleware.CORSWithConfig(echoMiddleware.CORSConfig{
-		AllowOriginFunc: func(origin string) (bool, error) { return true, nil },
+		AllowOriginFunc: func(origin string) (bool, error) {
+			return config.IsAdminCORSOriginAllowed(origin), nil
+		},
 		AllowMethods: []string{
 			http.MethodGet,
 			http.MethodPost,
@@ -188,8 +191,8 @@ func registerAdminRoutes(e *echo.Echo) {
 
 	// Public (no JWT)
 	adminV1.POST("/auth/login", admin.Ctrl.Login)
-	adminV1.GET("/auth/init-password", admin.Ctrl.GetInitialPassword)
-	adminV1.GET("/auth/init-password-hash", admin.Ctrl.GetInitialPasswordHash)
+	adminV1.GET("/auth/init-password", admin.Ctrl.GetInitialPassword, middleware.LocalOnly())
+	adminV1.GET("/auth/init-password-hash", admin.Ctrl.GetInitialPasswordHash, middleware.LocalOnly())
 
 	// Authenticated
 	authed := adminV1.Group("", middleware.CheckAdminJWT())

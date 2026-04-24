@@ -28,6 +28,7 @@ import (
 	"text/template"
 	"time"
 
+	appMiddleware "github.com/GMWalletApp/epusdt/middleware"
 	luluHttp "github.com/GMWalletApp/epusdt/util/http"
 	"github.com/gookit/color"
 	"github.com/labstack/echo/v4"
@@ -35,8 +36,10 @@ import (
 )
 
 // DefaultInstallAddr is the listen address used by the install API.
-// Matches the default http_listen so no extra port is needed.
-const DefaultInstallAddr = ":8000"
+// Bind to loopback by default so the first-run installer is never exposed
+// publicly by accident. Operators who need remote install should write a
+// config file explicitly instead of exposing this unauthenticated setup API.
+const DefaultInstallAddr = "127.0.0.1:8000"
 
 // InstallRequest is the payload submitted by the install form.
 // All fields are optional except AppURI; omitted fields fall back to InstallDefaults().
@@ -184,8 +187,8 @@ func RunInstallServer(listenAddr, envFilePath string) {
 	// api routes for the install frontend
 	api := e.Group("/api")
 
-	api.GET("/install/defaults", h.GetDefaults)
-	api.POST("/install", h.Submit)
+	api.GET("/install/defaults", h.GetDefaults, appMiddleware.LocalOnly())
+	api.POST("/install", h.Submit, appMiddleware.LocalOnly())
 
 	// Resolve www/ relative to the executable so SPA routes work regardless
 	// of the working directory. main.go extracts www/ next to the binary.
@@ -206,9 +209,6 @@ func RunInstallServer(listenAddr, envFilePath string) {
 
 	// Build a human-readable URL for the console hint.
 	installHost := listenAddr
-	if strings.HasPrefix(installHost, ":") {
-		installHost = "localhost" + installHost
-	}
 	color.Green.Printf("[install] no config found — install API available at http://%s/install\n", installHost)
 
 	go func() {
@@ -329,6 +329,7 @@ runtime_sqlite_filename=epusdt-runtime.db
 queue_concurrency=10
 queue_poll_interval_ms=1000
 callback_retry_base_seconds=5
+evm_confirmations=12
 
 order_expiration_time={{.OrderExpirationTime}}
 order_notice_max_retry={{.OrderNoticeMaxRetry}}

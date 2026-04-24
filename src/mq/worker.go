@@ -226,7 +226,10 @@ func sendOrderCallback(order *mdb.Orders) error {
 			"sign_type":    "MD5",
 		}
 
-		epayResp, err := http_client.GetHttpClient().R().SetQueryParams(formData).Get(order.NotifyUrl)
+		if err := http_client.ValidateOutboundURL(order.NotifyUrl); err != nil {
+			return err
+		}
+		epayResp, err := http_client.GetSafeHttpClient().R().SetQueryParams(formData).Get(order.NotifyUrl)
 		if err != nil {
 			return err
 		}
@@ -240,7 +243,10 @@ func sendOrderCallback(order *mdb.Orders) error {
 
 	default:
 
-		client := http_client.GetHttpClient()
+		if err := http_client.ValidateOutboundURL(order.NotifyUrl); err != nil {
+			return err
+		}
+		client := http_client.GetSafeHttpClient()
 		orderResp := response.OrderNotifyResponse{
 			Pid:                apiKeyRow.Pid,
 			TradeId:            order.TradeId,

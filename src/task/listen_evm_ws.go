@@ -2,8 +2,10 @@ package task
 
 import (
 	"context"
+	"math/big"
 	"time"
 
+	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/util/log"
 
 	"github.com/ethereum/go-ethereum"
@@ -11,12 +13,14 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
+type evmLogHandler func(*ethclient.Client, types.Log, int64)
+
 // runEvmWsLogListener connects to wsURL, subscribes to Transfer logs,
 // and dispatches each log to handleLog. It retries on transient errors
 // with exponential backoff. The ctx lets the caller trigger a clean
 // exit — e.g. when admin disables the chain, the caller cancels the
 // context and the function returns instead of reconnecting forever.
-func runEvmWsLogListener(ctx context.Context, logPrefix, wsURL string, query ethereum.FilterQuery, handleLog func(*ethclient.Client, types.Log)) {
+func runEvmWsLogListener(ctx context.Context, logPrefix, wsURL string, query ethereum.FilterQuery, handleLog evmLogHandler) {
 	const (
 		minBackoff = 2 * time.Second
 		maxBackoff = 60 * time.Second
@@ -65,7 +69,7 @@ func runEvmWsLogListener(ctx context.Context, logPrefix, wsURL string, query eth
 	}
 }
 
-func recvLoop(ctx context.Context, client *ethclient.Client, sub ethereum.Subscription, logsCh <-chan types.Log, logPrefix string, handleLog func(*ethclient.Client, types.Log)) {
+func recvLoop(ctx context.Context, client *ethclient.Client, sub ethereum.Subscription, logsCh <-chan types.Log, logPrefix string, handleLog evmLogHandler) {
 	defer func() {
 		sub.Unsubscribe()
 		client.Close()
@@ -88,9 +92,68 @@ func recvLoop(ctx context.Context, client *ethclient.Client, sub ethereum.Subscr
 				log.Sugar.Warnf("%s log channel closed, reconnecting", logPrefix)
 				return
 			}
-			handleLog(client, vLog)
+			blockTsMs, ok := waitForConfirmedEVMLog(ctx, client, vLog, logPrefix)
+			if !ok {
+				continue
+			}
+			handleLog(client, vLog, blockTsMs)
 		}
 	}
+}
+
+func waitForConfirmedEVMLog(ctx context.Context, client *ethclient.Client, vLog types.Log, logPrefix string) (int64, bool) {
+	if vLog.Removed {
+		log.Sugar.Warnf("%s dropped removed log tx=%s block=%d", logPrefix, vLog.TxHash.Hex(), vLog.BlockNumber)
+		return 0, false
+	}
+
+	blockHeader, err := client.HeaderByHash(ctx, vLog.BlockHash)
+	if err != nil {
+		log.Sugar.Warnf("%s HeaderByHash block=%s: %v", logPrefix, vLog.BlockHash.Hex(), err)
+		return 0, false
+	}
+	if blockHeader == nil || blockHeader.Number == nil {
+		log.Sugar.Warnf("%s missing block header for tx=%s block=%d", logPrefix, vLog.TxHash.Hex(), vLog.BlockNumber)
+		return 0, false
+	}
+
+	confirmations := config.GetEVMConfirmations()
+	blockNumber := blockHeader.Number.Uint64()
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		latest, err := client.HeaderByNumber(ctx, nil)
+		if err != nil {
+			log.Sugar.Warnf("%s HeaderByNumber latest: %v", logPrefix, err)
+		} else if latest != nil && latest.Number != nil && latest.Number.Uint64() >= blockNumber {
+			if latest.Number.Uint64()-blockNumber+1 >= confirmations {
+				if !isCanonicalEVMBlock(ctx, client, vLog, blockHeader.Number, logPrefix) {
+					return 0, false
+				}
+				return int64(blockHeader.Time) * 1000, true
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return 0, false
+		case <-ticker.C:
+		}
+	}
+}
+
+func isCanonicalEVMBlock(ctx context.Context, client *ethclient.Client, vLog types.Log, blockNumber *big.Int, logPrefix string) bool {
+	canonical, err := client.HeaderByNumber(ctx, new(big.Int).Set(blockNumber))
+	if err != nil {
+		log.Sugar.Warnf("%s canonical block check failed block=%d: %v", logPrefix, vLog.BlockNumber, err)
+		return false
+	}
+	if canonical == nil || canonical.Hash() != vLog.BlockHash {
+		log.Sugar.Warnf("%s dropped non-canonical log tx=%s block=%d", logPrefix, vLog.TxHash.Hex(), vLog.BlockNumber)
+		return false
+	}
+	return true
 }
 
 // sleepOrDone waits for d or for ctx cancellation, whichever comes

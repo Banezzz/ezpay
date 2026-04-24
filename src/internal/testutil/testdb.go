@@ -27,6 +27,7 @@ func SetupTestDatabases(t testing.TB) func() {
 	viper.Set("callback_retry_base_seconds", 1)
 	viper.Set("queue_concurrency", 4)
 	viper.Set("queue_poll_interval_ms", 50)
+	t.Setenv("EPUSDT_ALLOW_PRIVATE_CALLBACKS", "true")
 
 	config.HTTPAccessLog = false
 	config.SQLDebug = false

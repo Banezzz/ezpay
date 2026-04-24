@@ -1,7 +1,6 @@
 package task
 
 import (
-	"context"
 	"math/big"
 	"strings"
 	"sync/atomic"
@@ -77,7 +76,7 @@ func runBscListener(contracts []common.Address) {
 		Topics:    [][]common.Hash{},
 	}
 
-	runEvmWsLogListener(ctx, "[BSC-WS]", wsURL, query, func(client *ethclient.Client, vLog types.Log) {
+	runEvmWsLogListener(ctx, "[BSC-WS]", wsURL, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
 		if len(vLog.Topics) < 3 {
 			return
 		}
@@ -93,15 +92,6 @@ func runBscListener(contracts []common.Address) {
 
 		if !isWatchedBscRecipient(toAddr) {
 			return
-		}
-
-		var blockTsMs int64
-		header, err := client.HeaderByNumber(context.Background(), big.NewInt(int64(vLog.BlockNumber)))
-		if err != nil {
-			log.Sugar.Warnf("[BSC-WS] HeaderByNumber block=%d: %v, using local time", vLog.BlockNumber, err)
-			blockTsMs = time.Now().UnixMilli()
-		} else {
-			blockTsMs = int64(header.Time) * 1000
 		}
 
 		service.TryProcessEvmERC20Transfer(mdb.NetworkBsc, vLog.Address, toAddr, amount, vLog.TxHash.Hex(), blockTsMs)

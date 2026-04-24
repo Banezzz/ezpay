@@ -1,9 +1,10 @@
 package service
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -304,9 +305,12 @@ func ReserveAvailableWalletAndAmount(tradeID string, network string, token strin
 
 // GenerateCode creates a unique trade id.
 func GenerateCode() string {
-	date := time.Now().Format("20060102")
-	r := rand.Intn(1000)
-	return fmt.Sprintf("%s%d%03d", date, time.Now().UnixNano()/1e6, r)
+	now := time.Now()
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return fmt.Sprintf("%s%d", now.Format("20060102"), now.UnixNano())
+	}
+	return fmt.Sprintf("%s%d%s", now.Format("20060102"), now.UnixMilli(), hex.EncodeToString(randomBytes))
 }
 
 // GetOrderInfoByTradeId returns a validated order.

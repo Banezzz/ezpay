@@ -126,6 +126,15 @@ func doGet(e *echo.Echo, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
+func doLocalGet(e *echo.Echo, path string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Host = "localhost:8000"
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+
 // assertOK asserts the response status is 200 and the status_code field is 200.
 func assertOK(t *testing.T, rec *httptest.ResponseRecorder) map[string]interface{} {
 	t.Helper()
@@ -301,7 +310,12 @@ func TestAdminInitPasswordFlow(t *testing.T) {
 	_ = data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyInitAdminPasswordFetched, "false", mdb.SettingTypeBool)
 	_ = data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyInitAdminPasswordChanged, "false", mdb.SettingTypeBool)
 
-	recHash := doGet(e, "/admin/api/v1/auth/init-password-hash")
+	recRemote := doGet(e, "/admin/api/v1/auth/init-password")
+	if recRemote.Code != http.StatusForbidden {
+		t.Fatalf("remote init-password should be forbidden, got %d body=%s", recRemote.Code, recRemote.Body.String())
+	}
+
+	recHash := doLocalGet(e, "/admin/api/v1/auth/init-password-hash")
 	respHash := assertOK(t, recHash)
 	hashData, _ := respHash["data"].(map[string]interface{})
 	if got := hashData["password_hash"]; got != data.HashInitialAdminPassword(initPassword) {
@@ -311,7 +325,7 @@ func TestAdminInitPasswordFlow(t *testing.T) {
 		t.Fatalf("expected password_changed=false before change, got true")
 	}
 
-	recFetch := doGet(e, "/admin/api/v1/auth/init-password")
+	recFetch := doLocalGet(e, "/admin/api/v1/auth/init-password")
 	respFetch := assertOK(t, recFetch)
 	fetchData, _ := respFetch["data"].(map[string]interface{})
 	if fetchData["username"] != testAdminUsername {
@@ -321,7 +335,7 @@ func TestAdminInitPasswordFlow(t *testing.T) {
 		t.Fatalf("expected initial password %s, got %v", initPassword, fetchData["password"])
 	}
 
-	recFetch2 := doGet(e, "/admin/api/v1/auth/init-password")
+	recFetch2 := doLocalGet(e, "/admin/api/v1/auth/init-password")
 	if recFetch2.Code != http.StatusBadRequest {
 		t.Fatalf("second fetch should fail with 400, got %d body=%s", recFetch2.Code, recFetch2.Body.String())
 	}
@@ -344,7 +358,7 @@ func TestAdminInitPasswordFlow(t *testing.T) {
 	}, token)
 	assertOK(t, recChange)
 
-	recHash2 := doGet(e, "/admin/api/v1/auth/init-password-hash")
+	recHash2 := doLocalGet(e, "/admin/api/v1/auth/init-password-hash")
 	respHash2 := assertOK(t, recHash2)
 	hashData2, _ := respHash2["data"].(map[string]interface{})
 	if got, _ := hashData2["password_changed"].(bool); !got {

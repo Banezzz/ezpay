@@ -1,11 +1,15 @@
 services:
   epusdt:
-    image: gmwallet/epusdt:latest
+    image: gmwallet/epusdt:local
     restart: always
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./env:/app/.env
+      - ./docker/epusdt.env:/app/.env:ro
+      - epusdt-data:/app/data
     ports:
-      - "8000:8000"
+      - "50506:8000"
+
+volumes:
+  epusdt-data:

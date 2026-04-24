@@ -234,6 +234,76 @@ func GetAppUri() string {
 	return viper.GetString("app_uri")
 }
 
+// GetAdminCORSOrigins returns the explicit browser origins allowed to call the
+// admin API. Comma-separated admin_cors_origins / ADMIN_CORS_ORIGINS wins; when
+// unset, the configured app_uri origin is the only cross-origin admin caller.
+func GetAdminCORSOrigins() []string {
+	raw := strings.TrimSpace(viper.GetString("admin_cors_origins"))
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("ADMIN_CORS_ORIGINS"))
+	}
+	if raw == "" {
+		if appOrigin := normalizeOrigin(GetAppUri()); appOrigin != "" {
+			return []string{appOrigin}
+		}
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		origin := normalizeOrigin(part)
+		if origin == "" {
+			continue
+		}
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		origins = append(origins, origin)
+	}
+	return origins
+}
+
+func IsAdminCORSOriginAllowed(origin string) bool {
+	origin = normalizeOrigin(origin)
+	if origin == "" {
+		// Non-browser requests have no Origin header and do not need CORS.
+		return true
+	}
+	for _, allowed := range GetAdminCORSOrigins() {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeOrigin(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+	default:
+		return ""
+	}
+	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
+}
+
+func GetEVMConfirmations() uint64 {
+	confirmations := viper.GetInt("evm_confirmations")
+	if confirmations <= 0 {
+		return 12
+	}
+	return uint64(confirmations)
+}
+
 func GetRateApiUrl() string {
 	// settings table wins (admin-configurable); .env and env var remain
 	// as fallbacks for smooth migration from the old layout.
