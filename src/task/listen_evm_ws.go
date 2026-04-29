@@ -3,17 +3,26 @@ package task
 import (
 	"context"
 	"math/big"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/GMWalletApp/epusdt/config"
+	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/util/log"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type evmLogHandler func(*ethclient.Client, types.Log, int64)
+
+const (
+	evmBackfillBlockWindow uint64 = 1200
+	evmBackfillChunkSize   uint64 = 200
+)
 
 // runEvmWsLogListener connects to wsURL, subscribes to Transfer logs,
 // and dispatches each log to handleLog. It retries on transient errors
@@ -43,7 +52,9 @@ func runEvmWsLogListener(ctx context.Context, logPrefix, wsURL string, query eth
 			continue
 		}
 
-		logsCh := make(chan types.Log)
+		backfillRecentEVMLogs(ctx, client, logPrefix, query, handleLog)
+
+		logsCh := make(chan types.Log, 256)
 		sub, err := client.SubscribeFilterLogs(ctx, query, logsCh)
 		if err != nil {
 			client.Close()
@@ -66,6 +77,120 @@ func runEvmWsLogListener(ctx context.Context, logPrefix, wsURL string, query eth
 		if !sleepOrDone(ctx, rejoinWait) {
 			return
 		}
+	}
+}
+
+func evmRecipientTopicHashes(wallets []mdb.WalletAddress) []common.Hash {
+	seen := make(map[string]common.Hash)
+	for _, w := range wallets {
+		address := strings.TrimSpace(w.Address)
+		if !common.IsHexAddress(address) {
+			continue
+		}
+		addr := common.HexToAddress(address)
+		seen[strings.ToLower(addr.Hex())] = common.BytesToHash(addr.Bytes())
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	topics := make([]common.Hash, 0, len(keys))
+	for _, key := range keys {
+		topics = append(topics, seen[key])
+	}
+	return topics
+}
+
+func evmRecipientFingerprint(wallets []mdb.WalletAddress) string {
+	topics := evmRecipientTopicHashes(wallets)
+	if len(topics) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(topics))
+	for _, topic := range topics {
+		parts = append(parts, topic.Hex())
+	}
+	return strings.Join(parts, ",")
+}
+
+func evmTransferQuery(contracts []common.Address, recipientTopics []common.Hash) ethereum.FilterQuery {
+	return ethereum.FilterQuery{
+		Addresses: contracts,
+		Topics: [][]common.Hash{
+			{transferEventHash},
+			nil,
+			recipientTopics,
+		},
+	}
+}
+
+func backfillRecentEVMLogs(ctx context.Context, client *ethclient.Client, logPrefix string, query ethereum.FilterQuery, handleLog evmLogHandler) {
+	latest, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		log.Sugar.Warnf("%s backfill latest block: %v", logPrefix, err)
+		return
+	}
+	if latest == nil || latest.Number == nil {
+		log.Sugar.Warnf("%s backfill latest block missing number", logPrefix)
+		return
+	}
+
+	latestNumber := latest.Number.Uint64()
+	confirmations := config.GetEVMConfirmations()
+	if latestNumber+1 <= confirmations {
+		return
+	}
+
+	toBlock := latestNumber + 1 - confirmations
+	fromBlock := uint64(0)
+	if toBlock > evmBackfillBlockWindow {
+		fromBlock = toBlock - evmBackfillBlockWindow
+	}
+
+	processed := 0
+	for start := fromBlock; start <= toBlock; {
+		if ctx.Err() != nil {
+			return
+		}
+
+		end := start + evmBackfillChunkSize - 1
+		if end > toBlock {
+			end = toBlock
+		}
+
+		chunkQuery := query
+		chunkQuery.FromBlock = new(big.Int).SetUint64(start)
+		chunkQuery.ToBlock = new(big.Int).SetUint64(end)
+		logs, err := client.FilterLogs(ctx, chunkQuery)
+		if err != nil {
+			log.Sugar.Warnf("%s backfill logs blocks=%d-%d: %v", logPrefix, start, end, err)
+			return
+		}
+
+		for _, vLog := range logs {
+			if ctx.Err() != nil {
+				return
+			}
+			blockTsMs, ok := waitForConfirmedEVMLog(ctx, client, vLog, logPrefix)
+			if !ok {
+				continue
+			}
+			handleLog(client, vLog, blockTsMs)
+			processed++
+		}
+
+		if end == toBlock {
+			break
+		}
+		start = end + 1
+	}
+
+	if processed > 0 {
+		log.Sugar.Infof("%s backfilled %d log(s) from blocks %d-%d", logPrefix, processed, fromBlock, toBlock)
 	}
 }
 

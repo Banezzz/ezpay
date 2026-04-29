@@ -11,7 +11,6 @@ import (
 	"github.com/GMWalletApp/epusdt/model/service"
 	"github.com/GMWalletApp/epusdt/util/log"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -45,6 +44,12 @@ func runPolygonListener(contracts []common.Address) {
 		log.Sugar.Errorf("[POLYGON-WS] Failed to get wallet addresses: %v", err)
 		return
 	}
+	recipientTopics := evmRecipientTopicHashes(wallets)
+	if len(recipientTopics) == 0 {
+		log.Sugar.Debug("[POLYGON-WS] no valid wallet addresses to watch")
+		return
+	}
+	recipientFingerprint := evmRecipientFingerprint(wallets)
 	storePolygonRecipientsFromWallets(wallets)
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -59,6 +64,11 @@ func runPolygonListener(contracts []common.Address) {
 					log.Sugar.Warnf("[POLYGON-WS] refresh wallet addresses: %v", err)
 					continue
 				}
+				if fp := evmRecipientFingerprint(w); fp != recipientFingerprint {
+					log.Sugar.Info("[POLYGON-WS] wallet addresses changed, reconnecting")
+					cancel()
+					return
+				}
 				storePolygonRecipientsFromWallets(w)
 			}
 		}
@@ -68,12 +78,9 @@ func runPolygonListener(contracts []common.Address) {
 	if !ok {
 		return
 	}
-	log.Sugar.Infof("[POLYGON-WS] connecting to %s watching %d contract(s)", wsURL, len(contracts))
+	log.Sugar.Infof("[POLYGON-WS] connecting to %s watching %d contract(s), %d recipient(s)", wsURL, len(contracts), len(recipientTopics))
 
-	query := ethereum.FilterQuery{
-		Addresses: contracts,
-		Topics:    [][]common.Hash{},
-	}
+	query := evmTransferQuery(contracts, recipientTopics)
 
 	runEvmWsLogListener(ctx, "[POLYGON-WS]", wsURL, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
 		if len(vLog.Topics) < 3 {

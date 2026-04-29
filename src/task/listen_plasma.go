@@ -11,7 +11,6 @@ import (
 	"github.com/GMWalletApp/epusdt/model/service"
 	"github.com/GMWalletApp/epusdt/util/log"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -45,6 +44,12 @@ func runPlasmaListener(contracts []common.Address) {
 		log.Sugar.Errorf("[PLASMA-WS] Failed to get wallet addresses: %v", err)
 		return
 	}
+	recipientTopics := evmRecipientTopicHashes(wallets)
+	if len(recipientTopics) == 0 {
+		log.Sugar.Debug("[PLASMA-WS] no valid wallet addresses to watch")
+		return
+	}
+	recipientFingerprint := evmRecipientFingerprint(wallets)
 	storePlasmaRecipientsFromWallets(wallets)
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -59,6 +64,11 @@ func runPlasmaListener(contracts []common.Address) {
 					log.Sugar.Warnf("[PLASMA-WS] refresh wallet addresses: %v", err)
 					continue
 				}
+				if fp := evmRecipientFingerprint(w); fp != recipientFingerprint {
+					log.Sugar.Info("[PLASMA-WS] wallet addresses changed, reconnecting")
+					cancel()
+					return
+				}
 				storePlasmaRecipientsFromWallets(w)
 			}
 		}
@@ -68,12 +78,9 @@ func runPlasmaListener(contracts []common.Address) {
 	if !ok {
 		return
 	}
-	log.Sugar.Infof("[PLASMA-WS] connecting to %s watching %d contract(s)", wsURL, len(contracts))
+	log.Sugar.Infof("[PLASMA-WS] connecting to %s watching %d contract(s), %d recipient(s)", wsURL, len(contracts), len(recipientTopics))
 
-	query := ethereum.FilterQuery{
-		Addresses: contracts,
-		Topics:    [][]common.Hash{},
-	}
+	query := evmTransferQuery(contracts, recipientTopics)
 
 	runEvmWsLogListener(ctx, "[PLASMA-WS]", wsURL, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
 		if len(vLog.Topics) < 3 {
