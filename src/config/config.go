@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -34,8 +35,6 @@ var (
 	TgBotToken         string
 	TgProxy            string
 	TgManage           int64
-	UsdtRate           float64
-	RateApiUrl         string
 	BuildVersion       = "0.0.0-dev"
 	BuildCommit        = "none"
 	BuildDate          = "unknown"
@@ -64,6 +63,9 @@ func Init() {
 	LogLevel = normalizeLogLevel(viper.GetString("log_level"))
 	StaticPath = normalizeStaticURLPath(viper.GetString("static_path"))
 	StaticFilePath = filepath.Join(configRootPath, strings.TrimPrefix(StaticPath, "/"))
+	if err = ensureConfiguredStaticFiles(); err != nil {
+		panic(err)
+	}
 	RuntimePath = resolvePathFromBase(configRootPath, viper.GetString("runtime_root_path"), filepath.Join(configRootPath, "runtime"))
 	LogSavePath = resolvePathFromBase(RuntimePath, viper.GetString("log_save_path"), filepath.Join(RuntimePath, "logs"))
 	mustMkdir(RuntimePath)
@@ -76,14 +78,99 @@ func Init() {
 	TgBotToken = viper.GetString("tg_bot_token")
 	TgProxy = viper.GetString("tg_proxy")
 	TgManage = viper.GetInt64("tg_manage")
-
-	RateApiUrl = GetRateApiUrl()
 }
 
 func mustMkdir(path string) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		panic(err)
 	}
+}
+
+func ensureConfiguredStaticFiles() error {
+	if strings.TrimSpace(StaticFilePath) == "" {
+		return nil
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	exePath, err = filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return err
+	}
+
+	srcDir := filepath.Join(filepath.Dir(exePath), "static")
+	srcInfo, err := os.Stat(srcDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if !srcInfo.IsDir() {
+		return nil
+	}
+
+	srcAbs, err := filepath.Abs(srcDir)
+	if err != nil {
+		return err
+	}
+	dstAbs, err := filepath.Abs(StaticFilePath)
+	if err != nil {
+		return err
+	}
+	if srcAbs == dstAbs {
+		return nil
+	}
+
+	return copyMissingStaticFiles(srcAbs, dstAbs)
+}
+
+func copyMissingStaticFiles(srcDir, dstDir string) error {
+	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcDir, path)
+		if err != nil {
+			return err
+		}
+		dstPath := filepath.Join(dstDir, rel)
+		if d.IsDir() {
+			return os.MkdirAll(dstPath, 0o755)
+		}
+		if _, err = os.Stat(dstPath); err == nil {
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err = os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+			return err
+		}
+		return copyFile(path, dstPath)
+	})
+}
+
+func copyFile(srcPath, dstPath string) error {
+	in, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+
+	if _, err = io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func normalizeLogLevel(level string) string {
@@ -345,13 +432,14 @@ func GetRateForCoin(coin string, base string) float64 {
 			if usdtRate > 0 {
 				return 1 / usdtRate
 			}
+			return 0
 		}
 	}
+	return getRateForCoinFromAPI(coin, base)
+}
 
-	baseURL := RateApiUrl
-	if baseURL == "" {
-		baseURL = GetRateApiUrl()
-	}
+func getRateForCoinFromAPI(coin string, base string) float64 {
+	baseURL := GetRateApiUrl()
 	if baseURL == "" {
 		log.Printf("rate api url is empty")
 		return 0.0
@@ -383,19 +471,18 @@ func GetRateForCoin(coin string, base string) float64 {
 }
 
 func GetUsdtRate() float64 {
-	// Prefer the DB-backed override (admin-configurable). Fall back to
-	// the legacy .env var, then the hardcoded 6.4 default.
+	// Only the admin setting can force the USDT/CNY rate. When the
+	// setting is unset, zero, or negative, fall back to the rate API.
 	if forced := settingsForcedUsdtRate(); forced > 0 {
 		return forced
 	}
-	forcedUsdtRate := viper.GetFloat64("forced_usdt_rate")
-	if forcedUsdtRate > 0 {
-		return forcedUsdtRate
+
+	apiRate := getRateForCoinFromAPI("usdt", "cny")
+	if apiRate > 0 {
+		return 1 / apiRate
 	}
-	if UsdtRate <= 0 {
-		return 6.4
-	}
-	return UsdtRate
+	log.Printf("usdt/cny rate unavailable: rate.forced_usdt_rate <= 0 and rate api returned no data")
+	return 0
 }
 
 func GetOrderExpirationTime() int {

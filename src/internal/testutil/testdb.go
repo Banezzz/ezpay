@@ -20,7 +20,6 @@ func SetupTestDatabases(t testing.TB) func() {
 	t.Helper()
 
 	viper.Reset()
-	viper.Set("forced_usdt_rate", 1.0)
 	viper.Set("app_uri", "https://example.com")
 	viper.Set("order_expiration_time", 10)
 	viper.Set("order_notice_max_retry", 2)
@@ -32,7 +31,6 @@ func SetupTestDatabases(t testing.TB) func() {
 	config.HTTPAccessLog = false
 	config.SQLDebug = false
 	config.LogLevel = "error"
-	config.UsdtRate = 0
 	appLog.Sugar = zap.NewNop().Sugar()
 
 	mainDB := mustOpenSQLite(t, filepath.Join(t.TempDir(), "main.db"))
@@ -53,6 +51,16 @@ func SetupTestDatabases(t testing.TB) func() {
 
 	dao.Mdb = mainDB
 	dao.RuntimeDB = runtimeDB
+	config.SettingsGetString = func(key string) string {
+		if dao.Mdb == nil {
+			return ""
+		}
+		var row mdb.Setting
+		if err := dao.Mdb.Where("`key` = ?", key).Take(&row).Error; err != nil {
+			return ""
+		}
+		return row.Value
+	}
 
 	// Seed all standard chains as enabled so IsChainEnabled checks pass.
 	for _, network := range []string{
@@ -75,12 +83,21 @@ func SetupTestDatabases(t testing.TB) func() {
 		Pid:  "1001", SecretKey: "test-token",
 		Status: mdb.ApiKeyStatusEnable,
 	})
+	if err := dao.Mdb.Create(&mdb.Setting{
+		Group: "rate",
+		Key:   "rate.forced_usdt_rate",
+		Value: "1.0",
+		Type:  "string",
+	}).Error; err != nil {
+		t.Fatalf("seed rate.forced_usdt_rate: %v", err)
+	}
 
 	return func() {
 		closeDB(t, runtimeDB)
 		closeDB(t, mainDB)
 		dao.Mdb = nil
 		dao.RuntimeDB = nil
+		config.SettingsGetString = nil
 		viper.Reset()
 	}
 }

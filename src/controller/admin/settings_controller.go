@@ -14,8 +14,8 @@ import (
 // Supported groups and keys:
 //
 //   - group=rate:
-//     rate.forced_usdt_rate  (float)  — override USDT exchange rate (0 = use api)
-//     rate.api_url           (string) — external rate API URL
+//     rate.forced_usdt_rate  (float)  — override USDT/CNY when > 0; <= 0 uses rate.api_url
+//     rate.api_url           (string) — external rate API URL used when rate.forced_usdt_rate <= 0
 //     rate.adjust_percent    (float)  — rate adjustment percentage
 //     rate.okx_c2c_enabled   (bool)   — use OKX C2C rate feed
 //
@@ -73,7 +73,7 @@ func (c *BaseAdminController) ListSettings(ctx echo.Context) error {
 // @Description  Batch insert/update settings. Returns per-key status.
 // @Description  Supported groups: brand, rate, system, epay.
 // @Description  epay group keys: epay.default_token (e.g. "usdt"), epay.default_currency (e.g. "cny"), epay.default_network (e.g. "tron").
-// @Description  rate group keys: rate.forced_usdt_rate, rate.api_url, rate.adjust_percent, rate.okx_c2c_enabled.
+// @Description  rate group keys: rate.forced_usdt_rate (>0 overrides USDT/CNY; <=0 uses rate.api_url), rate.api_url, rate.adjust_percent, rate.okx_c2c_enabled.
 // @Description  brand group keys: brand.site_name, brand.logo_url, brand.page_title, brand.pay_success_text, brand.support_url.
 // @Description  system group keys: system.order_expiration_time.
 // @Tags         Admin Settings

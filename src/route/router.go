@@ -23,12 +23,20 @@ import (
 
 // RegisterRoute 路由注册
 func RegisterRoute(e *echo.Echo) {
-	e.Any("/", func(c echo.Context) error {
+	e.POST("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "hello epusdt, https://github.com/GMwalletApp/epusdt")
 	})
 
 	payRoute := e.Group("/pay")
-	payRoute.GET("/checkout-counter/:trade_id", comm.Ctrl.CheckoutCounter)
+	payRoute.GET("/checkout-counter/:trade_id", func(ctx echo.Context) error {
+		tradeId := ctx.Param("trade_id")
+
+		targetURL := fmt.Sprintf("/cashier/%s", tradeId)
+
+		return ctx.Redirect(http.StatusMovedPermanently, targetURL)
+	})
+
+	payRoute.GET("/checkout-counter-resp/:trade_id", comm.Ctrl.CheckoutCounter)
 	payRoute.GET("/check-status/:trade_id", comm.Ctrl.CheckStatus)
 	payRoute.POST("/switch-network", comm.Ctrl.SwitchNetwork)
 

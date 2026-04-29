@@ -12,9 +12,6 @@ import (
 	"github.com/gookit/color"
 )
 
-//go:embed all:static
-var staticDir embed.FS
-
 //go:embed all:www
 var wwwDir embed.FS
 
@@ -92,12 +89,6 @@ func releaseStatic(fs embed.FS, target string) (string, error) {
 }
 
 func main() {
-	staticPath, err := releaseStatic(staticDir, "static")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("static released to:", staticPath)
-
 	wwwwPath, err := releaseStatic(wwwDir, "www")
 	if err != nil {
 		panic(err)

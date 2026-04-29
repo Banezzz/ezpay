@@ -22,7 +22,7 @@ func InitApp() {
 		log.Init()
 		dao.Init()
 		// Wire settings-table lookups into the config package so
-		// GetRateApiUrl / GetUsdtRate prefer DB-backed overrides.
+		// GetRateApiUrl / GetUsdtRate can consult admin-configured values.
 		config.SettingsGetString = func(key string) string {
 			return data.GetSettingString(key, "")
 		}
@@ -36,9 +36,6 @@ func InitApp() {
 				}
 			}
 		}
-		// config.Init() computes RateApiUrl before SettingsGetString is
-		// installed, so refresh the cache once DB-backed settings are available.
-		config.RateApiUrl = config.GetRateApiUrl()
 		// Seed admin account and JWT secret so the management console is
 		// immediately usable on a fresh install. Both are idempotent.
 		initialPassword, isNew, err := data.EnsureDefaultAdmin()

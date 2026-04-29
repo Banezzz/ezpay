@@ -2,9 +2,12 @@ package service
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/GMWalletApp/epusdt/internal/testutil"
 	"github.com/GMWalletApp/epusdt/model/dao"
@@ -12,6 +15,8 @@ import (
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/model/request"
 	"github.com/GMWalletApp/epusdt/util/constant"
+	"github.com/GMWalletApp/epusdt/util/http_client"
+	"github.com/go-resty/resty/v2"
 )
 
 func newCreateTransactionRequest(orderID string, amount float64) *request.CreateTransactionRequest {
@@ -23,6 +28,26 @@ func newCreateTransactionRequest(orderID string, amount float64) *request.Create
 		Amount:    amount,
 		NotifyUrl: "https://merchant.example/callback",
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func installMockHTTPClient(t *testing.T, handler roundTripFunc) {
+	t.Helper()
+
+	oldFactory := http_client.ClientFactory
+	http_client.ClientFactory = func() *resty.Client {
+		client := resty.NewWithClient(&http.Client{Transport: handler})
+		client.SetTimeout(10 * time.Second)
+		return client
+	}
+	t.Cleanup(func() {
+		http_client.ClientFactory = oldFactory
+	})
 }
 
 func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
@@ -69,6 +94,59 @@ func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
 	}
 	if tradeID2 != resp2.TradeId {
 		t.Fatalf("second runtime lock = %s, want %s", tradeID2, resp2.TradeId)
+	}
+}
+
+func TestCreateTransactionUsesRateAPIWhenForcedSettingIsNotPositive(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	installMockHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/cny.json" {
+			t.Fatalf("rate api path = %s, want /cny.json", r.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"cny":{"usdt":0.14635}}`)),
+			Request:    r,
+		}, nil
+	})
+
+	if err := data.SetSetting("rate", "rate.forced_usdt_rate", "0", "string"); err != nil {
+		t.Fatalf("set rate.forced_usdt_rate: %v", err)
+	}
+	if err := data.SetSetting("rate", "rate.api_url", "https://rate.example.test", "string"); err != nil {
+		t.Fatalf("set rate.api_url: %v", err)
+	}
+	if _, err := data.AddWalletAddress("wallet_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+
+	resp, err := CreateTransaction(newCreateTransactionRequest("order_api_rate_1", 10), nil)
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	if got := fmt.Sprintf("%.2f", resp.ActualAmount); got != "1.46" {
+		t.Fatalf("actual amount = %s, want 1.46", got)
+	}
+}
+
+func TestCreateTransactionFailsWhenRateAPIUnavailableAndForcedSettingIsNotPositive(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := data.SetSetting("rate", "rate.forced_usdt_rate", "0", "string"); err != nil {
+		t.Fatalf("set rate.forced_usdt_rate: %v", err)
+	}
+	if err := data.SetSetting("rate", "rate.api_url", "", "string"); err != nil {
+		t.Fatalf("clear rate.api_url: %v", err)
+	}
+
+	_, err := CreateTransaction(newCreateTransactionRequest("order_missing_rate_1", 10), nil)
+	if err != constant.RateAmountErr {
+		t.Fatalf("create transaction error = %v, want %v", err, constant.RateAmountErr)
 	}
 }
 

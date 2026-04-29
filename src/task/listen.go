@@ -13,24 +13,19 @@ func Start() {
 	go StartBscWebSocketListener()
 	go StartPolygonWebSocketListener()
 	go StartPlasmaWebSocketListener()
+	go StartTronBlockScannerListener()
 
 	c := cron.New()
-	// TRC20 polling
-	_, err := c.AddJob("@every 5s", ListenTrc20Job{})
-	if err != nil {
-		log.Sugar.Errorf("[task] Failed to add ListenTrc20Job: %v", err)
-		return
-	}
 
-	log.Sugar.Info("[task] ListenTrc20Job scheduled successfully (@every 5s)")
 	// Solana polling
-	_, err = c.AddJob("@every 5s", ListenSolJob{})
+	_, err := c.AddJob("@every 5s", ListenSolJob{})
 	if err != nil {
 		log.Sugar.Errorf("[task] Failed to add ListenSolJob: %v", err)
 		return
 	}
 
 	log.Sugar.Info("[task] ListenSolJob scheduled successfully (@every 5s)")
+
 	// RPC node health checks
 	_, err = c.AddJob("@every 30s", RpcHealthJob{})
 	if err != nil {
@@ -38,6 +33,7 @@ func Start() {
 		return
 	}
 	log.Sugar.Info("[task] RpcHealthJob scheduled successfully (@every 30s)")
+
 	c.Start()
 	log.Sugar.Info("[task] Task scheduler started")
 }

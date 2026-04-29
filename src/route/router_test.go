@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
@@ -33,7 +34,6 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	viper.Set("app_uri", "http://localhost:8080")
 	viper.Set("order_expiration_time", 10)
 	viper.Set("api_rate_url", "")
-	viper.Set("forced_usdt_rate", 7.0)
 	viper.Set("runtime_root_path", tmpDir)
 	viper.Set("log_save_path", tmpDir)
 	viper.Set("sqlite_database_filename", tmpDir+"/test.db")
@@ -68,6 +68,15 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 
 	// reset the settings cache so stale entries from a prior test don't leak
 	_ = data.ReloadSettings()
+	config.SettingsGetString = func(key string) string {
+		return data.GetSettingString(key, "")
+	}
+	t.Cleanup(func() {
+		config.SettingsGetString = nil
+	})
+	if err := data.SetSetting("rate", "rate.forced_usdt_rate", "7.0", "string"); err != nil {
+		t.Fatalf("seed rate.forced_usdt_rate: %v", err)
+	}
 
 	// seed wallet addresses
 	dao.Mdb.Create(&mdb.WalletAddress{Network: mdb.NetworkTron, Address: "TTestTronAddress001", Status: mdb.TokenStatusEnable})
@@ -156,6 +165,21 @@ func doFormPost(e *echo.Echo, path string, values url.Values) *httptest.Response
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestRootPostRoute(t *testing.T) {
+	e := setupTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "hello epusdt, https://github.com/GMwalletApp/epusdt" {
+		t.Fatalf("unexpected body: %q", body)
+	}
 }
 
 // TestCreateOrderGmpayV1Solana tests the gmpay route with solana network.

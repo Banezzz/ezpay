@@ -37,9 +37,12 @@ var blockedCallbackCIDRs = mustParseCallbackCIDRs([]string{
 	"2001:db8::/32",
 })
 
+// ClientFactory is overridden in tests to stub outbound HTTP calls.
+var ClientFactory = resty.New
+
 // GetHttpClient 获取请求客户端
 func GetHttpClient(proxys ...string) *resty.Client {
-	client := resty.New()
+	client := ClientFactory()
 	// 如果有代理
 	if len(proxys) > 0 {
 		proxy := proxys[0]

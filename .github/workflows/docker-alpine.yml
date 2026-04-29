@@ -33,7 +33,7 @@ jobs:
           images: ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=alpine
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=ref,event=branch,suffix=-alpine
             type=ref,event=tag
             type=sha,prefix=sha-,suffix=-alpine

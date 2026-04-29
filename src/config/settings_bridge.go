@@ -5,7 +5,7 @@ package config
 // create a cycle via `model/dao -> config`.
 //
 // If unset (e.g. during early startup or tests) the getters return the
-// zero string / 0 and callers fall through to the .env / default path.
+// zero string / 0 and callers apply their own fallback behavior.
 
 // SettingsGetString is installed by bootstrap.Init with a closure that
 // reads from the settings table. Runtime-only.
