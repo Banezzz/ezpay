@@ -34,6 +34,14 @@ func Start() {
 	}
 	log.Sugar.Info("[task] RpcHealthJob scheduled successfully (@every 30s)")
 
+	go RpcChainlistSyncJob{}.Run()
+	_, err = c.AddJob("@every 24h", RpcChainlistSyncJob{})
+	if err != nil {
+		log.Sugar.Errorf("[task] Failed to add RpcChainlistSyncJob: %v", err)
+		return
+	}
+	log.Sugar.Info("[task] RpcChainlistSyncJob scheduled successfully (@every 24h)")
+
 	c.Start()
 	log.Sugar.Info("[task] Task scheduler started")
 }

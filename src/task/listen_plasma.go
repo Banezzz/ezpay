@@ -74,15 +74,13 @@ func runPlasmaListener(contracts []common.Address) {
 		}
 	}()
 
-	wsURL, ok := resolveChainWsURL(mdb.NetworkPlasma, "[PLASMA-WS]")
-	if !ok {
-		return
-	}
-	log.Sugar.Infof("[PLASMA-WS] connecting to %s watching %d contract(s), %d recipient(s)", wsURL, len(contracts), len(recipientTopics))
+	log.Sugar.Infof("[PLASMA-WS] watching %d contract(s), %d recipient(s)", len(contracts), len(recipientTopics))
 
 	query := evmTransferQuery(contracts, recipientTopics)
 
-	runEvmWsLogListener(ctx, "[PLASMA-WS]", wsURL, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
+	runEvmWsLogListener(ctx, "[PLASMA-WS]", func() (*mdb.RpcNode, bool) {
+		return resolveChainWsNode(mdb.NetworkPlasma, "[PLASMA-WS]")
+	}, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
 		if len(vLog.Topics) < 3 {
 			return
 		}

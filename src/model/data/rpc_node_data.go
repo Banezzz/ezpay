@@ -32,6 +32,53 @@ func CreateRpcNode(row *mdb.RpcNode) error {
 	return dao.Mdb.Create(row).Error
 }
 
+// UpsertRpcNodeByNetworkURLType inserts a new node or refreshes health
+// fields for an existing node matching network+url+type. Existing
+// enabled/disabled choices are preserved so an admin-disabled node is
+// not silently re-enabled by automatic discovery.
+func UpsertRpcNodeByNetworkURLType(row *mdb.RpcNode) (bool, error) {
+	network := strings.ToLower(strings.TrimSpace(row.Network))
+	nodeType := strings.ToLower(strings.TrimSpace(row.Type))
+	rpcURL := strings.TrimSpace(row.Url)
+	if network == "" || nodeType == "" || rpcURL == "" {
+		return false, nil
+	}
+
+	existing := new(mdb.RpcNode)
+	err := dao.Mdb.Model(&mdb.RpcNode{}).
+		Where("network = ?", network).
+		Where("lower(url) = ?", strings.ToLower(rpcURL)).
+		Where("type = ?", nodeType).
+		Limit(1).
+		Find(existing).Error
+	if err != nil {
+		return false, err
+	}
+
+	if existing.ID == 0 {
+		row.Network = network
+		row.Type = nodeType
+		row.Url = rpcURL
+		if row.Weight < 1 {
+			row.Weight = 1
+		}
+		if row.Status == "" {
+			row.Status = mdb.RpcNodeStatusUnknown
+		}
+		return true, dao.Mdb.Create(row).Error
+	}
+
+	fields := map[string]interface{}{
+		"status":          row.Status,
+		"last_latency_ms": row.LastLatencyMs,
+		"last_checked_at": row.LastCheckedAt.StdTime(),
+	}
+	if existing.Weight < 1 {
+		fields["weight"] = 1
+	}
+	return false, dao.Mdb.Model(&mdb.RpcNode{}).Where("id = ?", existing.ID).Updates(fields).Error
+}
+
 // UpdateRpcNodeFields patches mutable columns.
 func UpdateRpcNodeFields(id uint64, fields map[string]interface{}) error {
 	if len(fields) == 0 {
@@ -116,6 +163,26 @@ func pickWeighted(rows []mdb.RpcNode) *mdb.RpcNode {
 func UpdateRpcNodeHealth(id uint64, status string, latencyMs int) error {
 	return dao.Mdb.Model(&mdb.RpcNode{}).
 		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":          status,
+			"last_latency_ms": latencyMs,
+			"last_checked_at": carbon.Now().StdTime(),
+		}).Error
+}
+
+// UpdateRpcNodeHealthByNetworkURLType refreshes health for an existing
+// node if present. It is a no-op for unknown URLs.
+func UpdateRpcNodeHealthByNetworkURLType(network, rpcURL, nodeType, status string, latencyMs int) error {
+	network = strings.ToLower(strings.TrimSpace(network))
+	nodeType = strings.ToLower(strings.TrimSpace(nodeType))
+	rpcURL = strings.TrimSpace(rpcURL)
+	if network == "" || nodeType == "" || rpcURL == "" {
+		return nil
+	}
+	return dao.Mdb.Model(&mdb.RpcNode{}).
+		Where("network = ?", network).
+		Where("lower(url) = ?", strings.ToLower(rpcURL)).
+		Where("type = ?", nodeType).
 		Updates(map[string]interface{}{
 			"status":          status,
 			"last_latency_ms": latencyMs,

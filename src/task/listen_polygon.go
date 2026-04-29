@@ -74,15 +74,13 @@ func runPolygonListener(contracts []common.Address) {
 		}
 	}()
 
-	wsURL, ok := resolveChainWsURL(mdb.NetworkPolygon, "[POLYGON-WS]")
-	if !ok {
-		return
-	}
-	log.Sugar.Infof("[POLYGON-WS] connecting to %s watching %d contract(s), %d recipient(s)", wsURL, len(contracts), len(recipientTopics))
+	log.Sugar.Infof("[POLYGON-WS] watching %d contract(s), %d recipient(s)", len(contracts), len(recipientTopics))
 
 	query := evmTransferQuery(contracts, recipientTopics)
 
-	runEvmWsLogListener(ctx, "[POLYGON-WS]", wsURL, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
+	runEvmWsLogListener(ctx, "[POLYGON-WS]", func() (*mdb.RpcNode, bool) {
+		return resolveChainWsNode(mdb.NetworkPolygon, "[POLYGON-WS]")
+	}, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
 		if len(vLog.Topics) < 3 {
 			return
 		}

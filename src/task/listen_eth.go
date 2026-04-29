@@ -80,15 +80,13 @@ func runEthereumListener(contracts []common.Address) {
 		}
 	}()
 
-	wsURL, ok := resolveChainWsURL(mdb.NetworkEthereum, "[ETH-WS]")
-	if !ok {
-		return
-	}
-	log.Sugar.Infof("[ETH-WS] connecting to %s watching %d contract(s), %d recipient(s)", wsURL, len(contracts), len(recipientTopics))
+	log.Sugar.Infof("[ETH-WS] watching %d contract(s), %d recipient(s)", len(contracts), len(recipientTopics))
 
 	query := evmTransferQuery(contracts, recipientTopics)
 
-	runEvmWsLogListener(ctx, "[ETH-WS]", wsURL, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
+	runEvmWsLogListener(ctx, "[ETH-WS]", func() (*mdb.RpcNode, bool) {
+		return resolveChainWsNode(mdb.NetworkEthereum, "[ETH-WS]")
+	}, query, func(_ *ethclient.Client, vLog types.Log, blockTsMs int64) {
 		if len(vLog.Topics) < 3 {
 			return
 		}

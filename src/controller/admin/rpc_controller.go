@@ -14,9 +14,9 @@ import (
 // CreateRpcNodeRequest is the payload for creating an RPC node.
 type CreateRpcNodeRequest struct {
 	Network string `json:"network" validate:"required" example:"tron"`
-	Url string `json:"url" validate:"required" example:"https://api.trongrid.io"`
+	Url     string `json:"url" validate:"required" example:"https://api.trongrid.io"`
 	// 连接类型 http=HTTP请求 ws=WebSocket长连接
-	Type string `json:"type" validate:"required|in:http,ws" enums:"http,ws" example:"http"`
+	Type    string `json:"type" validate:"required|in:http,ws" enums:"http,ws" example:"http"`
 	Weight  int    `json:"weight" example:"1"`
 	ApiKey  string `json:"api_key" example:""`
 	Enabled *bool  `json:"enabled" example:"true"`
@@ -154,10 +154,8 @@ func (c *BaseAdminController) DeleteRpcNode(ctx echo.Context) error {
 	return c.SucJson(ctx, nil)
 }
 
-// HealthCheckRpcNode performs an on-demand probe and writes the result.
-// For HTTP endpoints this is a GET to the URL with a short timeout; for
-// WS we just attempt a TCP-level check via the same HTTP client (the
-// handshake URL resolves the host identically).
+// HealthCheckRpcNode performs an on-demand network-aware probe and writes
+// the result.
 // @Summary      Health check RPC node
 // @Description  Perform an on-demand health probe on an RPC node
 // @Tags         Admin RPC Nodes
@@ -179,7 +177,7 @@ func (c *BaseAdminController) HealthCheckRpcNode(ctx echo.Context) error {
 	if row.ID == 0 {
 		return c.FailJson(ctx, errors.New("node not found"))
 	}
-	status, latency := task.ProbeNode(row.Url)
+	status, latency := task.ProbeRpcNode(*row)
 	if err := data.UpdateRpcNodeHealth(id, status, latency); err != nil {
 		return c.FailJson(ctx, err)
 	}

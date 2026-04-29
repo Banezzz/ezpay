@@ -89,23 +89,46 @@ func loadChainTokenContracts(network, logPrefix string) []common.Address {
 	return addrs
 }
 
-// resolveChainWsURL picks a healthy WS endpoint from rpc_nodes for the
+// resolveChainWsNode picks a healthy WS endpoint from rpc_nodes for the
 // given network. If no enabled node is configured, the caller skips the
 // current listener run so admin-side disabled/deleted rows are respected.
-func resolveChainWsURL(network, logPrefix string) (string, bool) {
+func resolveChainWsNode(network, logPrefix string) (*mdb.RpcNode, bool) {
 	node, err := data.SelectRpcNode(network, mdb.RpcNodeTypeWs)
 	if err == nil && node != nil && node.ID > 0 {
 		rpcURL := strings.TrimSpace(node.Url)
 		if rpcURL != "" {
-			return rpcURL, true
+			return node, true
 		}
 		log.Sugar.Errorf("%s rpc_nodes id=%d has empty url", logPrefix, node.ID)
-		return "", false
+		return nil, false
 	}
 	if err != nil {
 		log.Sugar.Errorf("%s resolve rpc_nodes err=%v", logPrefix, err)
 	} else {
 		log.Sugar.Warnf("%s no enabled %s WS RPC node configured in rpc_nodes", logPrefix, network)
 	}
-	return "", false
+	return nil, false
+}
+
+// resolveChainWsURL is kept for tests and simple callers; listeners use
+// resolveChainWsNode so they can mark a failing row down before retrying.
+func resolveChainWsURL(network, logPrefix string) (string, bool) {
+	node, ok := resolveChainWsNode(network, logPrefix)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(node.Url), true
+}
+
+func markRpcNodeDown(node *mdb.RpcNode, logPrefix string, reason error) {
+	if node == nil || node.ID == 0 {
+		return
+	}
+	if err := data.UpdateRpcNodeHealth(node.ID, mdb.RpcNodeStatusDown, -1); err != nil {
+		log.Sugar.Warnf("%s mark rpc_nodes id=%d down failed: %v", logPrefix, node.ID, err)
+		return
+	}
+	if reason != nil {
+		log.Sugar.Warnf("%s marked rpc_nodes id=%d down url=%s: %v", logPrefix, node.ID, strings.TrimSpace(node.Url), reason)
+	}
 }
