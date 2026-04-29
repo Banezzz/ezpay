@@ -374,17 +374,19 @@ func getSupportedNetworks(t *testing.T, e *echo.Echo) map[string][]string {
 	return result
 }
 
-// TestGetSupportedAssets_ChainTokenToggle verifies that:
-//   - disabling a chain_token removes that token (and possibly the whole network)
-//     from the /supported-assets response
-//   - re-enabling it brings it back
+// TestGetSupportedAssets_ChainTokenToggle verifies that checkout supported-assets
+// only exposes USDT payment options and tracks USDT enable/disable changes.
 func TestGetSupportedAssets_ChainTokenToggle(t *testing.T) {
 	e := setupTestEnv(t)
 
-	// Baseline: tron should appear with USDT and TRX.
+	// Baseline: tron should appear with only USDT.
 	before := getSupportedNetworks(t, e)
-	if _, ok := before["tron"]; !ok {
+	tronBefore, ok := before["tron"]
+	if !ok {
 		t.Fatal("expected tron in baseline supported-assets")
+	}
+	if len(tronBefore) != 1 || tronBefore[0] != "USDT" {
+		t.Fatalf("checkout should expose only tron USDT, got %v", tronBefore)
 	}
 
 	// Disable the tron USDT chain_token.
@@ -393,24 +395,10 @@ func TestGetSupportedAssets_ChainTokenToggle(t *testing.T) {
 		Update("enabled", false)
 
 	after := getSupportedNetworks(t, e)
-	tronTokens := after["tron"]
-	for _, tok := range tronTokens {
-		if tok == "USDT" {
-			t.Fatal("USDT should be absent after disabling tron USDT chain_token")
-		}
+	if _, ok := after["tron"]; ok {
+		t.Fatal("tron should disappear from checkout supported-assets when tron USDT is disabled")
 	}
-	t.Logf("After disabling tron USDT: tron tokens = %v", tronTokens)
-
-	// Disable the tron TRX chain_token as well — now tron has no tokens → network disappears.
-	dao.Mdb.Model(&mdb.ChainToken{}).
-		Where("network = ? AND symbol = ?", "tron", "TRX").
-		Update("enabled", false)
-
-	afterAllDisabled := getSupportedNetworks(t, e)
-	if _, ok := afterAllDisabled["tron"]; ok {
-		t.Fatal("tron should disappear from supported-assets when all its chain_tokens are disabled")
-	}
-	t.Logf("After disabling all tron tokens: networks = %v", afterAllDisabled)
+	t.Logf("After disabling tron USDT: networks = %v", after)
 
 	// Re-enable tron USDT — tron reappears with only USDT.
 	dao.Mdb.Model(&mdb.ChainToken{}).
@@ -503,6 +491,12 @@ func TestGetSupportedAssetsPublic(t *testing.T) {
 		row := item.(map[string]interface{})
 		network := row["network"].(string)
 		seen[network] = true
+		rawTokens := row["tokens"].([]interface{})
+		for _, tok := range rawTokens {
+			if tok.(string) != "USDT" {
+				t.Fatalf("checkout supported-assets should only expose USDT, got %v on %s", tok, network)
+			}
+		}
 	}
 	for _, n := range []string{"tron", "solana"} {
 		if !seen[n] {

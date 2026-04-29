@@ -97,7 +97,7 @@ func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
 	}
 }
 
-func TestCreateTransactionSelectsAssignedCheckoutOrder(t *testing.T) {
+func TestCreateTransactionLeavesCheckoutOrderAwaitingSelection(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
 
@@ -114,22 +114,63 @@ func TestCreateTransactionSelectsAssignedCheckoutOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load order: %v", err)
 	}
-	if !order.IsSelected {
-		t.Fatal("created order should be marked selected")
-	}
-
-	if err := dao.Mdb.Model(&mdb.Orders{}).
-		Where("trade_id = ?", resp.TradeId).
-		Update("is_selected", false).Error; err != nil {
-		t.Fatalf("simulate legacy unselected order: %v", err)
+	if order.IsSelected {
+		t.Fatal("created order should wait for checkout selection")
 	}
 
 	checkout, err := GetCheckoutCounterByTradeId(resp.TradeId)
 	if err != nil {
 		t.Fatalf("load checkout: %v", err)
 	}
-	if !checkout.IsSelected {
-		t.Fatal("checkout with assigned receive address should be treated as selected")
+	if checkout.IsSelected {
+		t.Fatal("checkout should expose selection step before user confirms")
+	}
+
+	selected, err := SwitchNetwork(&request.SwitchNetworkRequest{
+		TradeId: resp.TradeId,
+		Token:   resp.Token,
+		Network: mdb.NetworkTron,
+	})
+	if err != nil {
+		t.Fatalf("select checkout network: %v", err)
+	}
+	if !selected.IsSelected {
+		t.Fatal("selected checkout response should be marked selected")
+	}
+}
+
+func TestPaymentFlowRejectsNonUSDTToken(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("wallet_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+	if err := dao.Mdb.Create(&mdb.ChainToken{
+		Network:  mdb.NetworkTron,
+		Symbol:   "USDC",
+		Enabled:  true,
+		Decimals: 6,
+	}).Error; err != nil {
+		t.Fatalf("seed USDC token: %v", err)
+	}
+
+	req := newCreateTransactionRequest("order_usdc_1", 1)
+	req.Token = "USDC"
+	if _, err := CreateTransaction(req, nil); err != constant.SupportedAssetNotFound {
+		t.Fatalf("CreateTransaction error = %v, want %v", err, constant.SupportedAssetNotFound)
+	}
+
+	parent, err := CreateTransaction(newCreateTransactionRequest("order_usdt_parent", 1), nil)
+	if err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := SwitchNetwork(&request.SwitchNetworkRequest{
+		TradeId: parent.TradeId,
+		Token:   "USDC",
+		Network: mdb.NetworkTron,
+	}); err != constant.SupportedAssetNotFound {
+		t.Fatalf("SwitchNetwork error = %v, want %v", err, constant.SupportedAssetNotFound)
 	}
 }
 

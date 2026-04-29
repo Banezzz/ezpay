@@ -50,7 +50,7 @@ func RegisterPublicRoutes(e *echo.Echo) {
 
 	paymentRoute := e.Group("/payments")
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
-	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
+	gmpayV1.GET("/supported-assets", comm.Ctrl.GetCheckoutSupportedAssets)
 }
 
 // RegisterInternalRoutes registers merchant-facing order creation APIs. Keep

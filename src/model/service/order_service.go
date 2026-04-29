@@ -62,6 +62,13 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 	token := strings.ToUpper(strings.TrimSpace(req.Token))
 	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
 	network := strings.ToLower(strings.TrimSpace(req.Network))
+	if !data.IsChainEnabled(network) {
+		return nil, constant.ChainNotEnabled
+	}
+	if !IsSupportedPaymentAsset(network, token) {
+		return nil, constant.SupportedAssetNotFound
+	}
+
 	payAmount := math.MustParsePrecFloat64(req.Amount, 2)
 	rate := config.GetRateForCoin(strings.ToLower(token), strings.ToLower(currency))
 	if rate <= 0 {
@@ -85,9 +92,6 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 		return nil, constant.OrderAlreadyExists
 	}
 
-	if !data.IsChainEnabled(network) {
-		return nil, constant.ChainNotEnabled
-	}
 	walletAddress, err := data.GetAvailableWalletAddressByNetwork(network)
 	if err != nil {
 		return nil, err
@@ -117,7 +121,6 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 		Token:          token,
 		Network:        network,
 		Status:         mdb.StatusWaitPay,
-		IsSelected:     true,
 		NotifyUrl:      req.NotifyUrl,
 		RedirectUrl:    req.RedirectUrl,
 		Name:           req.Name,
@@ -350,6 +353,12 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
 	if parent.Status != mdb.StatusWaitPay {
 		return nil, constant.OrderNotWaitPay
 	}
+	if !data.IsChainEnabled(network) {
+		return nil, constant.ChainNotEnabled
+	}
+	if !IsSupportedPaymentAsset(network, token) {
+		return nil, constant.SupportedAssetNotFound
+	}
 
 	// 2. Same token+network as parent → mark selected and return
 	if strings.EqualFold(parent.Token, token) && strings.EqualFold(parent.Network, network) {
@@ -392,9 +401,6 @@ func SwitchNetwork(req *request.SwitchNetworkRequest) (*response.CheckoutCounter
 	}
 
 	// 6. Find and lock wallet
-	if !data.IsChainEnabled(network) {
-		return nil, constant.ChainNotEnabled
-	}
 	walletAddress, err := data.GetAvailableWalletAddressByNetwork(network)
 	if err != nil {
 		return nil, err

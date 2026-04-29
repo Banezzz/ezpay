@@ -7,6 +7,7 @@ import (
 
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/response"
+	"github.com/GMWalletApp/epusdt/model/service"
 	"github.com/GMWalletApp/epusdt/util/constant"
 	"github.com/labstack/echo/v4"
 )
@@ -25,6 +26,16 @@ import (
 // @Router       /payments/gmpay/v1/supported-assets [get]
 // @Router       /admin/api/v1/supported-assets [get]
 func (c *BaseCommController) GetSupportedAssets(ctx echo.Context) error {
+	return c.getSupportedAssets(ctx, false)
+}
+
+// GetCheckoutSupportedAssets returns only assets that the public checkout can
+// actually create payment orders for today.
+func (c *BaseCommController) GetCheckoutSupportedAssets(ctx echo.Context) error {
+	return c.getSupportedAssets(ctx, true)
+}
+
+func (c *BaseCommController) getSupportedAssets(ctx echo.Context, checkoutOnly bool) error {
 	chains, err := data.ListEnabledChains()
 	if err != nil {
 		return c.FailJson(ctx, err)
@@ -59,6 +70,9 @@ func (c *BaseCommController) GetSupportedAssets(ctx echo.Context) error {
 		for _, t := range tokens {
 			sym := strings.ToUpper(strings.TrimSpace(t.Symbol))
 			if sym == "" {
+				continue
+			}
+			if checkoutOnly && !service.IsSupportedPaymentToken(sym) {
 				continue
 			}
 			symbols = append(symbols, sym)

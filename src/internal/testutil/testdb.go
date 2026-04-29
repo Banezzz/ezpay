@@ -68,6 +68,7 @@ func SetupTestDatabases(t testing.TB) func() {
 		mdb.NetworkBsc, mdb.NetworkPolygon, mdb.NetworkPlasma,
 	} {
 		mainDB.Create(&mdb.Chain{Network: network, Enabled: true})
+		mainDB.Create(&mdb.ChainToken{Network: network, Symbol: "USDT", Enabled: true, Decimals: 6})
 	}
 
 	// Seed two universal api_keys rows. Both usable for EPAY/GMPAY
