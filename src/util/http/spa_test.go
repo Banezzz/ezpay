@@ -81,6 +81,8 @@ func TestShouldSkipSPAFallback(t *testing.T) {
 		{name: "payments sub path", path: "/payments/gmpay/v1/order/create-transaction", want: true},
 		{name: "pay root", path: "/pay", want: true},
 		{name: "pay sub path", path: "/pay/checkout-counter/abc", want: true},
+		{name: "payment static root", path: "/static", want: true},
+		{name: "payment static sub path", path: "/static/payment.js", want: true},
 		{name: "not exact prefix", path: "/apiary", want: false},
 		{name: "normal spa route", path: "/install", want: false},
 		{name: "normal asset route", path: "/assets/index.js", want: false},

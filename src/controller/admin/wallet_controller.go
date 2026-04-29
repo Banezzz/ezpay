@@ -32,9 +32,13 @@ type AdminChangeWalletStatusRequest struct {
 // AdminBatchImportRequest is the payload for batch importing wallets.
 type AdminBatchImportRequest struct {
 	Network string `json:"network" validate:"required" example:"tron"`
-	// Addresses listed as observation-only wallets. Private-key import
-	// and API-managed modes are out of scope for v1.
+	// Addresses listed as observation-only wallets.
 	Addresses []string `json:"addresses" validate:"required" example:"TAddr001,TAddr002,TAddr003"`
+}
+
+// AdminBatchDeleteWalletsRequest is the payload for deleting multiple wallets.
+type AdminBatchDeleteWalletsRequest struct {
+	IDs []uint64 `json:"ids" validate:"required" example:"1,2,3"`
 }
 
 // WalletListItem extends WalletAddress with order count.
@@ -85,7 +89,10 @@ func (c *BaseAdminController) AdminListWallets(ctx echo.Context) error {
 	}
 	out := make([]WalletListItem, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, WalletListItem{WalletAddress: r, OrderCount: counts[r.Address]})
+		out = append(out, WalletListItem{
+			WalletAddress: r,
+			OrderCount:    counts[r.Address],
+		})
 	}
 	return c.SucJson(ctx, out)
 }
@@ -150,7 +157,10 @@ func (c *BaseAdminController) AdminGetWallet(ctx echo.Context) error {
 		return c.FailJson(ctx, errors.New("wallet not found"))
 	}
 	counts, _ := data.CountOrdersByAddress()
-	return c.SucJson(ctx, WalletListItem{WalletAddress: *wallet, OrderCount: counts[wallet.Address]})
+	return c.SucJson(ctx, WalletListItem{
+		WalletAddress: *wallet,
+		OrderCount:    counts[wallet.Address],
+	})
 }
 
 // AdminUpdateWallet only patches remark (status has its own endpoint).
@@ -236,6 +246,49 @@ func (c *BaseAdminController) AdminDeleteWallet(ctx echo.Context) error {
 		return c.FailJson(ctx, err)
 	}
 	return c.SucJson(ctx, nil)
+}
+
+// AdminBatchDeleteWallets soft-deletes multiple wallets.
+// @Summary      Batch delete wallets
+// @Description  Soft-delete multiple wallets by ID
+// @Tags         Admin Wallets
+// @Security     AdminJWT
+// @Accept       json
+// @Produce      json
+// @Param        request body admin.AdminBatchDeleteWalletsRequest true "Wallet IDs"
+// @Success      200 {object} response.ApiResponse
+// @Failure      400 {object} response.ApiResponse
+// @Router       /admin/api/v1/wallets/batch-delete [post]
+func (c *BaseAdminController) AdminBatchDeleteWallets(ctx echo.Context) error {
+	req := new(AdminBatchDeleteWalletsRequest)
+	if err := ctx.Bind(req); err != nil {
+		return c.FailJson(ctx, err)
+	}
+	if err := c.ValidateStruct(ctx, req); err != nil {
+		return c.FailJson(ctx, err)
+	}
+	ids := make([]uint64, 0, len(req.IDs))
+	seen := make(map[uint64]struct{}, len(req.IDs))
+	for _, id := range req.IDs {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return c.FailJson(ctx, errors.New("ids is required"))
+	}
+	deletedCount, err := data.DeleteWalletAddressByIds(ids)
+	if err != nil {
+		return c.FailJson(ctx, err)
+	}
+	return c.SucJson(ctx, map[string]interface{}{
+		"deleted_count": deletedCount,
+	})
 }
 
 // AdminBatchImportWallets accepts a list of addresses and creates

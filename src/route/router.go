@@ -21,8 +21,16 @@ import (
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 )
 
-// RegisterRoute 路由注册
+// RegisterRoute registers the complete route surface for tests and the
+// single-port legacy deployment mode.
 func RegisterRoute(e *echo.Echo) {
+	RegisterPublicRoutes(e)
+	RegisterInternalRoutes(e)
+	RegisterAdminRoutes(e)
+}
+
+// RegisterPublicRoutes registers only the user-facing checkout surface.
+func RegisterPublicRoutes(e *echo.Echo) {
 	e.POST("/", func(c echo.Context) error {
 		return c.String(http.StatusOK, "hello epusdt, https://github.com/GMwalletApp/epusdt")
 	})
@@ -40,13 +48,20 @@ func RegisterRoute(e *echo.Echo) {
 	payRoute.GET("/check-status/:trade_id", comm.Ctrl.CheckStatus)
 	payRoute.POST("/switch-network", comm.Ctrl.SwitchNetwork)
 
-	// payment routes
+	paymentRoute := e.Group("/payments")
+	gmpayV1 := paymentRoute.Group("/gmpay/v1")
+	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
+}
+
+// RegisterInternalRoutes registers merchant-facing order creation APIs. Keep
+// this off the public checkout port; callers should reach it through Docker
+// internal networking or a private local port.
+func RegisterInternalRoutes(e *echo.Echo) {
 	paymentRoute := e.Group("/payments")
 
 	// gmpay v1 routes
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
 	gmpayV1.POST("/order/create-transaction", comm.Ctrl.CreateTransaction, middleware.CheckApiSign())
-	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
 	// gmpayV1.GET("/supported-assets/records", comm.Ctrl.ListSupportedAssetRecords)
 	// gmpayV1.GET("/supported-assets/:id", comm.Ctrl.GetSupportedAsset)
 
@@ -162,7 +177,10 @@ func RegisterRoute(e *echo.Echo) {
 
 		return comm.Ctrl.CreateTransactionAndRedirect(ctx)
 	})
+}
 
+// RegisterAdminRoutes registers the management API surface.
+func RegisterAdminRoutes(e *echo.Echo) {
 	registerAdminRoutes(e)
 }
 
@@ -249,11 +267,12 @@ func registerAdminRoutes(e *echo.Echo) {
 	// Wallet (address) management
 	authed.GET("/wallets", admin.Ctrl.AdminListWallets)
 	authed.POST("/wallets", admin.Ctrl.AdminAddWallet)
+	authed.POST("/wallets/batch-import", admin.Ctrl.AdminBatchImportWallets)
+	authed.POST("/wallets/batch-delete", admin.Ctrl.AdminBatchDeleteWallets)
 	authed.GET("/wallets/:id", admin.Ctrl.AdminGetWallet)
 	authed.PATCH("/wallets/:id", admin.Ctrl.AdminUpdateWallet)
 	authed.POST("/wallets/:id/status", admin.Ctrl.AdminChangeWalletStatus)
 	authed.DELETE("/wallets/:id", admin.Ctrl.AdminDeleteWallet)
-	authed.POST("/wallets/batch-import", admin.Ctrl.AdminBatchImportWallets)
 
 	// Orders
 	authed.GET("/orders", admin.Ctrl.ListOrders)

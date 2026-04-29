@@ -104,6 +104,15 @@ func DeleteWalletAddressById(id uint64) error {
 	return err
 }
 
+// DeleteWalletAddressByIds 批量软删除钱包
+func DeleteWalletAddressByIds(ids []uint64) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx := dao.Mdb.Where("id IN ?", ids).Delete(&mdb.WalletAddress{})
+	return tx.RowsAffected, tx.Error
+}
+
 // GetAvailableWalletAddress 获得所有可用的钱包地址
 func GetAvailableWalletAddress() ([]mdb.WalletAddress, error) {
 	var WalletAddressList []mdb.WalletAddress

@@ -607,6 +607,65 @@ func TestAdminWallets_BatchImport(t *testing.T) {
 	assertOK(t, rec)
 }
 
+// TestAdminWallets_BatchDelete verifies multiple wallets can be soft-deleted
+// in one admin request.
+func TestAdminWallets_BatchDelete(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	w1, err := data.AddWalletAddressWithNetwork(mdb.NetworkEthereum, "0xBatchDeleteAddr001")
+	if err != nil {
+		t.Fatalf("seed first wallet: %v", err)
+	}
+	w2, err := data.AddWalletAddressWithNetwork(mdb.NetworkEthereum, "0xBatchDeleteAddr002")
+	if err != nil {
+		t.Fatalf("seed second wallet: %v", err)
+	}
+
+	rec := doPostAdmin(e, "/admin/api/v1/wallets/batch-delete", map[string]interface{}{
+		"ids": []uint64{w1.ID, w2.ID},
+	}, token)
+	deleteResp := assertOK(t, rec)
+	dataObj, ok := deleteResp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("batch delete data = %#v", deleteResp["data"])
+	}
+	if got, _ := dataObj["deleted_count"].(float64); got != 2 {
+		t.Fatalf("deleted_count = %v, want 2", dataObj["deleted_count"])
+	}
+
+	var remaining int64
+	dao.Mdb.Model(&mdb.WalletAddress{}).Where("id IN ?", []uint64{w1.ID, w2.ID}).Count(&remaining)
+	if remaining != 0 {
+		t.Fatalf("remaining undeleted wallets = %d, want 0", remaining)
+	}
+}
+
+// TestAdminWallets_PrivateKeyRoutesRemoved verifies the admin API remains
+// observation-wallet only and does not expose server-side key custody routes.
+func TestAdminWallets_PrivateKeyRoutesRemoved(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPostAdmin(e, "/admin/api/v1/wallets/generate", map[string]interface{}{
+		"network": "tron",
+		"count":   1,
+	}, token)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("wallet generation route should be removed, got 200: %s", rec.Body.String())
+	}
+
+	rec = doGetAdmin(e, "/admin/api/v1/wallets/1/private-key", token)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("private-key export route should be removed, got 200: %s", rec.Body.String())
+	}
+
+	rec = doPostAdmin(e, "/admin/api/v1/wallets/export-private-keys", map[string]interface{}{
+		"ids": []uint64{1},
+	}, token)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("batch private-key export route should be removed, got 200: %s", rec.Body.String())
+	}
+}
+
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
 // TestAdminOrders_List verifies listing orders (empty initially).

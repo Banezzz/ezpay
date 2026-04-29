@@ -182,6 +182,42 @@ func TestRootPostRoute(t *testing.T) {
 	}
 }
 
+func TestSplitRouteSurfaces(t *testing.T) {
+	publicE := echo.New()
+	RegisterPublicRoutes(publicE)
+
+	rec := doPost(publicE, "/payments/gmpay/v1/order/create-transaction", map[string]interface{}{})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("public route should not expose merchant create endpoint, got %d", rec.Code)
+	}
+
+	rec = doPost(publicE, "/admin/api/v1/auth/login", map[string]interface{}{})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("public route should not expose admin API, got %d", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/pay/checkout-counter/test-trade", nil)
+	rec = httptest.NewRecorder()
+	publicE.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("public route should expose checkout redirect, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/cashier/test-trade" {
+		t.Fatalf("expected checkout redirect to /cashier/test-trade, got %q", loc)
+	}
+
+	internalE := echo.New()
+	RegisterInternalRoutes(internalE)
+	RegisterAdminRoutes(internalE)
+
+	req = httptest.NewRequest(http.MethodGet, "/pay/checkout-counter/test-trade", nil)
+	rec = httptest.NewRecorder()
+	internalE.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("internal/admin route should not expose checkout page, got %d", rec.Code)
+	}
+}
+
 // TestCreateOrderGmpayV1Solana tests the gmpay route with solana network.
 func TestCreateOrderGmpayV1Solana(t *testing.T) {
 	e := setupTestEnv(t)

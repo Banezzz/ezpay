@@ -8,8 +8,19 @@ services:
     volumes:
       - ./docker/epusdt.env:/app/.env:ro
       - epusdt-data:/app/data
+    environment:
+      - EPUSDT_ALLOW_PRIVATE_CALLBACKS=true
     ports:
-      - "127.0.0.1:50506:8000"
+      - "127.0.0.1:50505:8000"
+      - "127.0.0.1:50506:8001"
+    networks:
+      - default
+      - new-api-network
 
 volumes:
   epusdt-data:
+
+networks:
+  new-api-network:
+    external: true
+    name: new-api_new-api-network

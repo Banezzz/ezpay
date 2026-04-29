@@ -321,6 +321,22 @@ func GetAppUri() string {
 	return viper.GetString("app_uri")
 }
 
+func GetHTTPListen() string {
+	httpListen := strings.TrimSpace(viper.GetString("http_listen"))
+	if httpListen == "" {
+		return ":8000"
+	}
+	return httpListen
+}
+
+func GetAdminHTTPListen() string {
+	httpListen := strings.TrimSpace(viper.GetString("admin_http_listen"))
+	if httpListen == "" {
+		return ":8001"
+	}
+	return httpListen
+}
+
 // GetAdminCORSOrigins returns the explicit browser origins allowed to call the
 // admin API. Comma-separated admin_cors_origins / ADMIN_CORS_ORIGINS wins; when
 // unset, the configured app_uri origin is the only cross-origin admin caller.

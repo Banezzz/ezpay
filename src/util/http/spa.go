@@ -11,6 +11,7 @@ var spaFallbackDenyPrefixes = []string{
 	"/admin/api",
 	"/payments",
 	"/pay",
+	"/static",
 }
 
 // ShouldSkipSPAFallback reports whether a request path should bypass

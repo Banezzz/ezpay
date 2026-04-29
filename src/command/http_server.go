@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/GMWalletApp/epusdt/bootstrap"
@@ -20,7 +21,6 @@ import (
 	"github.com/labstack/echo/v4"
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var httpCmd = &cobra.Command{
@@ -55,15 +55,65 @@ var startCmd = &cobra.Command{
 }
 
 func HttpServerStart() {
-	var err error
+	paymentServer := newEchoServer()
+	MiddlewareRegister(paymentServer)
+	route.RegisterPublicRoutes(paymentServer)
+	paymentServer.Static(config.StaticPath, config.StaticFilePath)
+	registerPaymentSPA(paymentServer)
+
+	adminServer := newEchoServer()
+	MiddlewareRegister(adminServer)
+	route.RegisterInternalRoutes(adminServer)
+	route.RegisterAdminRoutes(adminServer)
+	registerAdminSPA(adminServer)
+
+	startEchoServer("payment", paymentServer, config.GetHTTPListen())
+	startEchoServer("admin", adminServer, config.GetAdminHTTPListen())
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, server := range []*echo.Echo{paymentServer, adminServer} {
+		if err := server.Shutdown(ctx); err != nil {
+			server.Logger.Fatal(err)
+		}
+	}
+}
+
+func newEchoServer() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	e.HTTPErrorHandler = customHTTPErrorHandler
+	return e
+}
 
-	MiddlewareRegister(e)
-	route.RegisterRoute(e)
-	e.Static(config.StaticPath, config.StaticFilePath)
+func registerPaymentSPA(e *echo.Echo) {
+	registerSPA(e, func(path string) bool {
+		if path == "/cashier" || strings.HasPrefix(path, "/cashier/") {
+			return false
+		}
+		if strings.HasPrefix(path, "/assets/") || strings.HasPrefix(path, "/images/") || isWWWRootAsset(path) {
+			return false
+		}
+		return true
+	})
+}
 
+func registerAdminSPA(e *echo.Echo) {
+	registerSPA(e, func(path string) bool {
+		if path == "/install" || strings.HasPrefix(path, "/install/") {
+			// The install wizard is only served by install.RunInstallServer
+			// before bootstrap. Once main server starts, block /install.
+			return true
+		}
+		return luluHttp.ShouldSkipSPAFallback(path)
+	})
+}
+
+func registerSPA(e *echo.Echo, shouldSkip func(path string) bool) {
 	// Resolve www/ relative to the executable so SPA routes work regardless
 	// of the working directory. main.go extracts www/ next to the binary.
 	wwwRoot := "./www"
@@ -74,35 +124,37 @@ func HttpServerStart() {
 	}
 	e.Use(echoMiddleware.StaticWithConfig(echoMiddleware.StaticConfig{
 		Skipper: func(c echo.Context) bool {
-			path := c.Request().URL.Path
-			if path == "/install" || strings.HasPrefix(path, "/install/") {
-				// The install wizard is only served by install.RunInstallServer
-				// before bootstrap. Once main server starts, block /install.
-				return true
-			}
-			return luluHttp.ShouldSkipSPAFallback(path)
+			return shouldSkip(c.Request().URL.Path)
 		},
 		HTML5: true,
 		Index: "index.html",
 		Root:  wwwRoot,
 	}))
+}
 
-	httpListen := viper.GetString("http_listen")
+func isWWWRootAsset(path string) bool {
+	switch path {
+	case "/apple-touch-icon.png",
+		"/favicon-16x16.png",
+		"/favicon-32x32.png",
+		"/favicon.ico",
+		"/manifest.webmanifest",
+		"/registerSW.js",
+		"/robots.txt",
+		"/sw.js":
+		return true
+	default:
+		return strings.HasPrefix(path, "/pwa-") || strings.HasPrefix(path, "/workbox-")
+	}
+}
+
+func startEchoServer(name string, e *echo.Echo, httpListen string) {
 	go func() {
-		if err = e.Start(httpListen); err != http.ErrServerClosed {
-			log.Sugar.Error(err)
+		log.Sugar.Infof("[http] %s server listening on %s", name, httpListen)
+		if err := e.Start(httpListen); err != nil && err != http.ErrServerClosed {
+			log.Sugar.Errorf("[http] %s server error: %v", name, err)
 		}
 	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, os.Kill)
-	<-quit
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err = e.Shutdown(ctx); err != nil {
-		e.Logger.Fatal(err)
-	}
 }
 
 func MiddlewareRegister(e *echo.Echo) {
