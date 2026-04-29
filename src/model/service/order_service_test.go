@@ -97,6 +97,42 @@ func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
 	}
 }
 
+func TestCreateTransactionSelectsAssignedCheckoutOrder(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("wallet_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+
+	resp, err := CreateTransaction(newCreateTransactionRequest("order_selected_1", 1), nil)
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+
+	order, err := data.GetOrderInfoByTradeId(resp.TradeId)
+	if err != nil {
+		t.Fatalf("load order: %v", err)
+	}
+	if !order.IsSelected {
+		t.Fatal("created order should be marked selected")
+	}
+
+	if err := dao.Mdb.Model(&mdb.Orders{}).
+		Where("trade_id = ?", resp.TradeId).
+		Update("is_selected", false).Error; err != nil {
+		t.Fatalf("simulate legacy unselected order: %v", err)
+	}
+
+	checkout, err := GetCheckoutCounterByTradeId(resp.TradeId)
+	if err != nil {
+		t.Fatalf("load checkout: %v", err)
+	}
+	if !checkout.IsSelected {
+		t.Fatal("checkout with assigned receive address should be treated as selected")
+	}
+}
+
 func TestCreateTransactionUsesRateAPIWhenForcedSettingIsNotPositive(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()

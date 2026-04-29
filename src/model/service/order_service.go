@@ -117,6 +117,7 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 		Token:          token,
 		Network:        network,
 		Status:         mdb.StatusWaitPay,
+		IsSelected:     true,
 		NotifyUrl:      req.NotifyUrl,
 		RedirectUrl:    req.RedirectUrl,
 		Name:           req.Name,
@@ -463,6 +464,6 @@ func buildCheckoutResponse(order *mdb.Orders) *response.CheckoutCounterResponse 
 		ExpirationTime: order.CreatedAt.AddMinutes(config.GetOrderExpirationTime()).TimestampMilli(),
 		RedirectUrl:    order.RedirectUrl,
 		CreatedAt:      order.CreatedAt.TimestampMilli(),
-		IsSelected:     order.IsSelected,
+		IsSelected:     checkoutOrderIsSelected(order),
 	}
 }

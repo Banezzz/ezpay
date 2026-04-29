@@ -32,7 +32,7 @@ func GetCheckoutCounterByTradeId(tradeId string) (*response.CheckoutCounterRespo
 		ExpirationTime: orderInfo.CreatedAt.AddMinutes(config.GetOrderExpirationTime()).TimestampMilli(),
 		RedirectUrl:    orderInfo.RedirectUrl,
 		CreatedAt:      orderInfo.CreatedAt.TimestampMilli(),
-		IsSelected:     orderInfo.IsSelected,
+		IsSelected:     checkoutOrderIsSelected(orderInfo),
 	}
 	return resp, nil
 }
