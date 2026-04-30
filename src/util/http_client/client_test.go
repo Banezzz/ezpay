@@ -28,7 +28,7 @@ func TestValidateOutboundURLRejectsUnsafeShapes(t *testing.T) {
 }
 
 func TestValidateOutboundURLAllowsPrivateTargetsWhenExplicitlyEnabled(t *testing.T) {
-	t.Setenv("EPUSDT_ALLOW_PRIVATE_CALLBACKS", "true")
+	t.Setenv("EZPAY_ALLOW_PRIVATE_CALLBACKS", "true")
 	if err := ValidateOutboundURL("http://127.0.0.1:8080/callback"); err != nil {
 		t.Fatalf("ValidateOutboundURL with private callbacks enabled: %v", err)
 	}

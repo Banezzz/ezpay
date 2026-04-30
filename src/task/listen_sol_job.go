@@ -3,10 +3,10 @@ package task
 import (
 	"sync"
 
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/model/service"
-	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/service"
+	"github.com/GMWalletApp/ezpay/util/log"
 )
 
 type ListenSolJob struct{}

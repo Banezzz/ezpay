@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
 	"github.com/labstack/echo/v4"
 )
 

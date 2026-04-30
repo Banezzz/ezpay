@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/GMWalletApp/epusdt/middleware"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/model/request"
-	"github.com/GMWalletApp/epusdt/model/service"
-	"github.com/GMWalletApp/epusdt/util/constant"
-	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/middleware"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/request"
+	"github.com/GMWalletApp/ezpay/model/service"
+	"github.com/GMWalletApp/ezpay/util/constant"
+	"github.com/GMWalletApp/ezpay/util/log"
 	"github.com/labstack/echo/v4"
 )
 

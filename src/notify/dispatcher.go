@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/log"
 )
 
 // Sender delivers an already-rendered text message via a channel row.

@@ -1,7 +1,7 @@
 package response
 
 type CheckoutCounterResponse struct {
-	TradeId        string  `json:"trade_id" example:"T2026041612345678"`        //  epusdt订单号
+	TradeId        string  `json:"trade_id" example:"T2026041612345678"`        //  ezpay订单号
 	Amount         float64 `json:"amount" example:"100.0000"`                   //  订单金额，保留4位小数 法币金额
 	ActualAmount   float64 `json:"actual_amount" example:"14.2857"`             //  订单实际需要支付的金额，保留4位小数 加密货币金额
 	Token          string  `json:"token" example:"USDT"`                        //  所属币种 TRX USDT......
@@ -15,7 +15,7 @@ type CheckoutCounterResponse struct {
 }
 
 type CheckStatusResponse struct {
-	TradeId string `json:"trade_id" example:"T2026041612345678"` //  epusdt订单号
+	TradeId string `json:"trade_id" example:"T2026041612345678"` //  ezpay订单号
 	// 订单状态 1=等待支付 2=支付成功 3=已过期
 	Status int `json:"status" enums:"1,2,3" example:"1"`
 }

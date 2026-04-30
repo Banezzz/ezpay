@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/mdb"
 	"gorm.io/gorm"
 )
 

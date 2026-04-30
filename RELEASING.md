@@ -15,7 +15,7 @@ For each tag like `v1.2.3`, GitHub Actions builds release archives for:
 
 Each archive includes:
 
-- the `epusdt` binary
+- the `ezpay` binary
 - `src/.env.example`
 - `src/static/`
 
@@ -49,7 +49,7 @@ git push origin v1.0.0
 Verify the GitHub build provenance attestation:
 
 ```bash
-gh attestation verify SHA256SUMS -R GMwalletApp/epusdt
+gh attestation verify SHA256SUMS -R Banezzz/ezpay
 ```
 
 ## Local validation

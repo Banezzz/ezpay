@@ -6,13 +6,13 @@
 
 ### 对于 dujiaoka 用户
 
-**只需要修改一个地方**：在 dujiaoka 后台支付插件配置中，将 API 地址前缀从 `/api` 改为 `/payments/epusdt` 即可。
+**只需要修改一个地方**：在 dujiaoka 后台支付插件配置中，将 API 地址前缀从 `/api` 改为 `/payments/ezpay` 即可。
 
 **示例**：
 
 ```
 旧配置：https://your-domain.com/api/v1/order/create-transaction
-新配置：https://your-domain.com/payments/epusdt/v1/order/create-transaction
+新配置：https://your-domain.com/payments/ezpay/v1/order/create-transaction
 ```
 
 **就这么简单！** 其他配置（密钥、回调地址等）完全不需要修改。
@@ -25,7 +25,7 @@
 
 | 原路由 | 新路由 | 说明 |
 |--------|--------|------|
-| `POST /api/v1/order/create-transaction` | `POST /payments/epusdt/v1/order/create-transaction` | 创建交易订单 |
+| `POST /api/v1/order/create-transaction` | `POST /payments/ezpay/v1/order/create-transaction` | 创建交易订单 |
 
 
 ## 新增配置项说明

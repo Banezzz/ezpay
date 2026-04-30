@@ -10,12 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/GMWalletApp/epusdt/config"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/log"
-	"github.com/GMWalletApp/epusdt/util/sign"
+	"github.com/GMWalletApp/ezpay/config"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/log"
+	"github.com/GMWalletApp/ezpay/util/sign"
 	"github.com/labstack/echo/v4"
 	"github.com/spf13/viper"
 	"gorm.io/gorm/clause"
@@ -42,8 +42,8 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	log.Init()
 
 	// init config paths
-	os.Setenv("EPUSDT_CONFIG", tmpDir)
-	defer os.Unsetenv("EPUSDT_CONFIG")
+	os.Setenv("EZPAY_CONFIG", tmpDir)
+	defer os.Unsetenv("EZPAY_CONFIG")
 
 	// init DB
 	if err := dao.DBInit(); err != nil {
@@ -177,7 +177,7 @@ func TestRootPostRoute(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if body := rec.Body.String(); body != "hello epusdt, https://github.com/GMwalletApp/epusdt" {
+	if body := rec.Body.String(); body != "hello ezpay, https://github.com/GMwalletApp/ezpay" {
 		t.Fatalf("unexpected body: %q", body)
 	}
 }

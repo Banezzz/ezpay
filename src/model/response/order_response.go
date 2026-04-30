@@ -2,7 +2,7 @@ package response
 
 // CreateTransactionResponse 创建订单成功返回
 type CreateTransactionResponse struct {
-	TradeId        string  `json:"trade_id" example:"T2026041612345678"`        //  epusdt订单号
+	TradeId        string  `json:"trade_id" example:"T2026041612345678"`        //  ezpay订单号
 	OrderId        string  `json:"order_id" example:"ORD20260416001"`           //  客户交易id
 	Amount         float64 `json:"amount" example:"100.0000"`                   //  订单金额，保留4位小数
 	Currency       string  `json:"currency" example:"CNY"`                      //  订单货币类型 CNY USD......
@@ -16,7 +16,7 @@ type CreateTransactionResponse struct {
 // OrderNotifyResponse 订单异步回调结构体
 type OrderNotifyResponse struct {
 	Pid                string  `json:"pid" example:"1000"`                               //  签名使用的商户 PID，商户据此查本地 secret 验签
-	TradeId            string  `json:"trade_id" example:"T2026041612345678"`             //  epusdt订单号
+	TradeId            string  `json:"trade_id" example:"T2026041612345678"`             //  ezpay订单号
 	OrderId            string  `json:"order_id" example:"ORD20260416001"`                //  客户交易id
 	Amount             float64 `json:"amount" example:"100.0000"`                        //  订单金额，保留4位小数
 	ActualAmount       float64 `json:"actual_amount" example:"14.2857"`                  //  订单实际需要支付的金额，保留4位小数

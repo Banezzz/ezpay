@@ -1,6 +1,6 @@
 1. 创建和进去这个目录
 ```shell
-mkdir epusdt && cd epusdt
+mkdir ezpay && cd ezpay
 ```
 
 2. 把配置文件放进去这个目录，只需要改
@@ -13,7 +13,7 @@ api_rate_url
 
 ```shell
 cat <<EOF > env
-app_name=epusdt
+app_name=ezpay
 app_uri=https://dujiaoka.com
 log_level=info
 http_access_log=false
@@ -58,7 +58,7 @@ mysql_max_open_conns=100
 mysql_max_life_time=6
 
 # sqlite runtime store config
-runtime_sqlite_filename=epusdt-runtime.db
+runtime_sqlite_filename=ezpay-runtime.db
 
 # background scheduler config
 queue_concurrency=10
@@ -81,8 +81,8 @@ EOF
 ```shell
 cat <<EOF > docker-compose.yaml
 services:
-  epusdt:
-    image: gmwallet/epusdt:latest
+  ezpay:
+    image: gmwallet/ezpay:latest
     restart: always
     build:
       context: .
@@ -99,4 +99,4 @@ docker compose up -d
 ```
 5. 配置独角兽后台
 
-商户密钥： http://your_domain/payments/epusdt/v1/order/create-transaction
+商户密钥： http://your_domain/payments/ezpay/v1/order/create-transaction

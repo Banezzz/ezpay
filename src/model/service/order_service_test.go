@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/internal/testutil"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/model/request"
-	"github.com/GMWalletApp/epusdt/util/constant"
-	"github.com/GMWalletApp/epusdt/util/http_client"
+	"github.com/GMWalletApp/ezpay/internal/testutil"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/request"
+	"github.com/GMWalletApp/ezpay/util/constant"
+	"github.com/GMWalletApp/ezpay/util/http_client"
 	"github.com/go-resty/resty/v2"
 )
 

@@ -1,8 +1,8 @@
 package http
 
 import (
-	"github.com/GMWalletApp/epusdt/util/constant"
-	"github.com/GMWalletApp/epusdt/util/page"
+	"github.com/GMWalletApp/ezpay/util/constant"
+	"github.com/GMWalletApp/ezpay/util/page"
 	"github.com/labstack/echo/v4"
 	"net/http"
 )

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/config"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/config"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/log"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"

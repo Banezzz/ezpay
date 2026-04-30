@@ -15,8 +15,8 @@ import (
 
 func TestInstallDefaults(t *testing.T) {
 	d := InstallDefaults()
-	if d.AppName != "epusdt" {
-		t.Errorf("AppName = %q, want epusdt", d.AppName)
+	if d.AppName != "ezpay" {
+		t.Errorf("AppName = %q, want ezpay", d.AppName)
 	}
 	if d.HttpBindAddr != "127.0.0.1" {
 		t.Errorf("HttpBindAddr = %q, want 127.0.0.1", d.HttpBindAddr)
@@ -84,8 +84,8 @@ func TestInstallAPIDefaults(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if body["app_name"] != "epusdt" {
-		t.Errorf("app_name = %v, want epusdt", body["app_name"])
+	if body["app_name"] != "ezpay" {
+		t.Errorf("app_name = %v, want ezpay", body["app_name"])
 	}
 	if body["http_bind_addr"] != "127.0.0.1" {
 		t.Errorf("http_bind_addr = %v, want 127.0.0.1", body["http_bind_addr"])

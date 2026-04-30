@@ -2,7 +2,7 @@ package sign
 
 import (
 	"errors"
-	"github.com/GMWalletApp/epusdt/util/json"
+	"github.com/GMWalletApp/ezpay/util/json"
 	"github.com/gookit/goutil/strutil"
 	"reflect"
 	"sort"

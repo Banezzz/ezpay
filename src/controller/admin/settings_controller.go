@@ -3,10 +3,10 @@ package admin
 import (
 	"strings"
 
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/telegram"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/telegram"
 	"github.com/labstack/echo/v4"
 )
 

@@ -1,5 +1,5 @@
 # 前言
-开发者可通过`Epusdt`提供的`http api`将交易功能集成至任何系统
+开发者可通过`EZPay`提供的`http api`将交易功能集成至任何系统
 
 # 接口统一加密方式
 ### 签名算法MD5
@@ -23,7 +23,7 @@ notify_url : http://example.com/notify
 redirect_url : http://example.com/redirect
 ```
 
-假设api接口认证token为：`epusdt_password_xasddawqe`(api接口认证token可以在`.env`文件设置)         
+假设api接口认证token为：`ezpay_password_xasddawqe`(api接口认证token可以在`.env`文件设置)         
 
 第一步：对参数按照key=value的格式，并按照参数名ASCII字典序排序如下：       
 ```
@@ -31,7 +31,7 @@ amount=42&notify_url=http://example.com/notify&order_id=20220201030210321&redire
 ```
 第二步：拼接API密钥并加密：
 ```
-MD5(amount=42&notify_url=http://example.com/notify&order_id=20220201030210321&redirect_url=http://example.com/redirectepusdt_password_xasddawqe)
+MD5(amount=42&notify_url=http://example.com/notify&order_id=20220201030210321&redirect_url=http://example.com/redirectezpay_password_xasddawqe)
 ```
 
 最终得到最终发送的数据：    
@@ -45,7 +45,7 @@ signature : 1cd4b52df5587cfb1968b0c0c6e156cd
 
 ### PHP加密示例
 ```php
-    function epusdtSign(array $parameter, string $signKey)
+    function ezpaySign(array $parameter, string $signKey)
     {
         ksort($parameter);
         reset($parameter); 
@@ -143,9 +143,9 @@ POST /api/v1/order/create-transaction
 
 # 异步回调
 
-支付成功后，`Epusdt`会向目标服务器发生异步通知，告知该笔交易已经支付完成。          
-失败`Epusdt`最高最多重试5次，请注意验证消息签名。      
-目标服务器处理完成后请返回字符串`ok`即可，否则`Epusdt`会一直重试发送消息，最高5次     
+支付成功后，`EZPay`会向目标服务器发生异步通知，告知该笔交易已经支付完成。          
+失败`EZPay`最高最多重试5次，请注意验证消息签名。      
+目标服务器处理完成后请返回字符串`ok`即可，否则`EZPay`会一直重试发送消息，最高5次     
 
 POST 【异步回调地址】
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/util/http_client"
+	"github.com/GMWalletApp/ezpay/util/http_client"
 	"github.com/spf13/viper"
 	"github.com/tidwall/gjson"
 )
@@ -210,7 +210,7 @@ func resolveConfigFilePath() (string, error) {
 	if explicitConfigPath != "" {
 		return normalizeConfiguredPath(explicitConfigPath)
 	}
-	if envPath := strings.TrimSpace(os.Getenv("EPUSDT_CONFIG")); envPath != "" {
+	if envPath := strings.TrimSpace(os.Getenv("EZPAY_CONFIG")); envPath != "" {
 		return normalizeConfiguredPath(envPath)
 	}
 	return normalizeConfiguredPath(".env")
@@ -242,7 +242,7 @@ func NeedsInstall() bool {
 func ResolveConfigPath() (path string, exists bool) {
 	candidate := explicitConfigPath
 	if candidate == "" {
-		if e := strings.TrimSpace(os.Getenv("EPUSDT_CONFIG")); e != "" {
+		if e := strings.TrimSpace(os.Getenv("EZPAY_CONFIG")); e != "" {
 			candidate = e
 		} else {
 			candidate = ".env"
@@ -312,7 +312,7 @@ func GetBuildDate() string {
 func GetAppName() string {
 	appName := viper.GetString("app_name")
 	if appName == "" {
-		return "epusdt"
+		return "ezpay"
 	}
 	return appName
 }
@@ -526,7 +526,7 @@ func GetOrderExpirationTimeDuration() time.Duration {
 func GetRuntimeSqlitePath() string {
 	filename := viper.GetString("runtime_sqlite_filename")
 	if filename == "" {
-		filename = "epusdt-runtime.db"
+		filename = "ezpay-runtime.db"
 	}
 	if filepath.IsAbs(filename) {
 		return filename
@@ -538,7 +538,7 @@ func GetRuntimeSqlitePath() string {
 func GetPrimarySqlitePath() string {
 	filename := strings.TrimSpace(viper.GetString("sqlite_database_filename"))
 	if filename == "" {
-		return filepath.Join(configRootPath, "epusdt.db")
+		return filepath.Join(configRootPath, "ezpay.db")
 	}
 	if filepath.IsAbs(filename) {
 		return filename

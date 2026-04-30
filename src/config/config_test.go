@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/util/http_client"
+	"github.com/GMWalletApp/ezpay/util/http_client"
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/viper"
 )
@@ -101,7 +101,7 @@ func TestResolveConfigFilePathUsesCurrentDirectoryByDefault(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	t.Setenv("EPUSDT_CONFIG", "")
+	t.Setenv("EZPAY_CONFIG", "")
 	SetConfigPath("")
 
 	got, err := resolveConfigFilePath()
@@ -164,7 +164,7 @@ func TestResolveConfigFilePathPrefersExplicitOverEnv(t *testing.T) {
 		t.Fatalf("write flag config: %v", err)
 	}
 
-	t.Setenv("EPUSDT_CONFIG", envDir)
+	t.Setenv("EZPAY_CONFIG", envDir)
 	SetConfigPath(flagDir)
 	defer SetConfigPath("")
 

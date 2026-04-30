@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/internal/testutil"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/sign"
+	"github.com/GMWalletApp/ezpay/internal/testutil"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/sign"
 )
 
 func TestProcessExpiredOrdersExpiresWaitingOrdersAndReleasesLocks(t *testing.T) {

@@ -6,7 +6,7 @@
 
 | 支付选项 | 商户id | 商户key | 商户密钥 | 备注 |     
 | :-----| :----- | :----- | :----- |:-----|       
-| Epusdt | api接口认证token	 | 空 | epusdt收银台地址+/api/v1/order/create-transaction| 如果独角数卡和epusdt在同一服务器则填写`127.0.0.1`不要填域名，例如`http://127.0.0.1:8000/api/v1/order/create-transaction` |             
+| EZPay | api接口认证token	 | 空 | ezpay收银台地址+/api/v1/order/create-transaction| 如果独角数卡和ezpay在同一服务器则填写`127.0.0.1`不要填域名，例如`http://127.0.0.1:8000/api/v1/order/create-transaction` |             
 
 示例：     
-![示例配置](../../wiki/img/dujiaoka_epusdt.png)
+![示例配置](../../wiki/img/dujiaoka_ezpay.png)

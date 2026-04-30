@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/model/request"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/request"
 	"github.com/dromara/carbon/v2"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
@@ -60,7 +60,7 @@ func GetOrderInfoByOrderId(orderId string) (*mdb.Orders, error) {
 	return order, err
 }
 
-// GetOrderInfoByTradeId fetches an order by epusdt trade id.
+// GetOrderInfoByTradeId fetches an order by ezpay trade id.
 func GetOrderInfoByTradeId(tradeId string) (*mdb.Orders, error) {
 	order := new(mdb.Orders)
 	err := dao.Mdb.Model(order).Limit(1).Find(order, "trade_id = ?", tradeId).Error

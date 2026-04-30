@@ -28,8 +28,8 @@ import (
 	"text/template"
 	"time"
 
-	appMiddleware "github.com/GMWalletApp/epusdt/middleware"
-	luluHttp "github.com/GMWalletApp/epusdt/util/http"
+	appMiddleware "github.com/GMWalletApp/ezpay/middleware"
+	luluHttp "github.com/GMWalletApp/ezpay/util/http"
 	"github.com/gookit/color"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -44,8 +44,8 @@ const DefaultInstallAddr = "127.0.0.1:8000"
 // InstallRequest is the payload submitted by the install form.
 // All fields are optional except AppURI; omitted fields fall back to InstallDefaults().
 type InstallRequest struct {
-	// Application display name (default: epusdt)
-	AppName string `json:"app_name" form:"app_name" example:"epusdt"`
+	// Application display name (default: ezpay)
+	AppName string `json:"app_name" form:"app_name" example:"ezpay"`
 	// Public base URL of the service, e.g. https://pay.example.com (required)
 	AppURI string `json:"app_uri" form:"app_uri" example:"https://pay.example.com"`
 	// Bind address for the HTTP server (default: 127.0.0.1)
@@ -65,7 +65,7 @@ type InstallRequest struct {
 // InstallDefaults returns sensible default values for the install form.
 func InstallDefaults() InstallRequest {
 	return InstallRequest{
-		AppName:             "epusdt",
+		AppName:             "ezpay",
 		AppURI:              "",
 		HttpBindAddr:        "127.0.0.1",
 		HttpBindPort:        8000,
@@ -350,7 +350,7 @@ sqlite_database_filename=
 sqlite_table_prefix=
 
 # sqlite runtime store config
-runtime_sqlite_filename=epusdt-runtime.db
+runtime_sqlite_filename=ezpay-runtime.db
 
 # background scheduler config
 queue_concurrency=10

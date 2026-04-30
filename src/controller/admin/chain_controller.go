@@ -1,7 +1,7 @@
 package admin
 
 import (
-	"github.com/GMWalletApp/epusdt/model/data"
+	"github.com/GMWalletApp/ezpay/model/data"
 	"github.com/labstack/echo/v4"
 )
 

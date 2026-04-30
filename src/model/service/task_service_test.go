@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/internal/testutil"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/notify"
+	"github.com/GMWalletApp/ezpay/internal/testutil"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/notify"
 )
 
 func TestSendPaymentNotificationUsesLatestOrderUpdatedAt(t *testing.T) {

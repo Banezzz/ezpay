@@ -3,9 +3,9 @@ package task
 import (
 	"testing"
 
-	"github.com/GMWalletApp/epusdt/internal/testutil"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/ezpay/internal/testutil"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/mdb"
 )
 
 func TestResolveChainWsURLRequiresEnabledRpcNode(t *testing.T) {

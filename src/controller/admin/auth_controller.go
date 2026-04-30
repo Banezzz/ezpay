@@ -3,9 +3,9 @@ package admin
 import (
 	"errors"
 
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	appjwt "github.com/GMWalletApp/epusdt/util/jwt"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	appjwt "github.com/GMWalletApp/ezpay/util/jwt"
 	"github.com/labstack/echo/v4"
 )
 

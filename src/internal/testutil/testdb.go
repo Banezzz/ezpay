@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/GMWalletApp/epusdt/config"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	appLog "github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/config"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	appLog "github.com/GMWalletApp/ezpay/util/log"
 	"github.com/libtnb/sqlite"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -26,7 +26,7 @@ func SetupTestDatabases(t testing.TB) func() {
 	viper.Set("callback_retry_base_seconds", 1)
 	viper.Set("queue_concurrency", 4)
 	viper.Set("queue_poll_interval_ms", 50)
-	t.Setenv("EPUSDT_ALLOW_PRIVATE_CALLBACKS", "true")
+	t.Setenv("EZPAY_ALLOW_PRIVATE_CALLBACKS", "true")
 
 	config.HTTPAccessLog = false
 	config.SQLDebug = false

@@ -24,9 +24,9 @@ These standards are also the default development constraints for future work:
 
 These local SQLite artifacts must never be committed:
 
-- `src/epusdt.db`
-- `src/epusdt.db-shm`
-- `src/epusdt.db-wal`
+- `src/ezpay.db`
+- `src/ezpay.db-shm`
+- `src/ezpay.db-wal`
 
 They are now excluded by `.gitignore`.
 

@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/log"
 	"github.com/dromara/carbon/v2"
 )
 
@@ -153,7 +153,7 @@ func fetchChainlist(ctx context.Context, sourceURL string) ([]chainlistChain, er
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 epusdt-rpc-sync")
+	req.Header.Set("User-Agent", "Mozilla/5.0 ezpay-rpc-sync")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)

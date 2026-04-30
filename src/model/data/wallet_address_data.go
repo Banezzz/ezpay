@@ -3,9 +3,9 @@ package data
 import (
 	"strings"
 
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/constant"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/constant"
 )
 
 // AddWalletAddress 创建钱包 (默认 tron 网络，用于 Telegram 添加)

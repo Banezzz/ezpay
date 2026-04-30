@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/config"
-	"github.com/GMWalletApp/epusdt/model/dao"
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/model/response"
-	"github.com/GMWalletApp/epusdt/util/http_client"
-	"github.com/GMWalletApp/epusdt/util/log"
-	"github.com/GMWalletApp/epusdt/util/sign"
+	"github.com/GMWalletApp/ezpay/config"
+	"github.com/GMWalletApp/ezpay/model/dao"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/response"
+	"github.com/GMWalletApp/ezpay/util/http_client"
+	"github.com/GMWalletApp/ezpay/util/log"
+	"github.com/GMWalletApp/ezpay/util/sign"
 )
 
 // resolveOrderApiKey returns the api_keys row that signed the order.
@@ -265,7 +265,7 @@ func sendOrderCallback(order *mdb.Orders) error {
 		orderResp.Signature = signature
 
 		resp, err := client.R().
-			SetHeader("powered-by", "Epusdt(https://github.com/GMwalletApp/epusdt)").
+			SetHeader("powered-by", "EZPay(https://github.com/GMwalletApp/ezpay)").
 			SetBody(orderResp).
 			Post(order.NotifyUrl)
 		if err != nil {

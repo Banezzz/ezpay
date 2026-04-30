@@ -1,4 +1,4 @@
-name: docker-alpine-epusdt
+name: docker-alpine-ezpay
 
 on:
   workflow_dispatch:
@@ -10,8 +10,8 @@ on:
       - "v*"
 
 env:
-  DOCKERHUB_NAMESPACE: gmwallet
-  IMAGE_NAME: epusdt
+  DOCKERHUB_NAMESPACE: banezzz
+  IMAGE_NAME: ezpay
 
 jobs:
   push-docker-hub:

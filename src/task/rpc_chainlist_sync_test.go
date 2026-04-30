@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/ezpay/model/mdb"
 )
 
 func TestChainlistRPCEntryUnmarshalSupportsStringAndObject(t *testing.T) {

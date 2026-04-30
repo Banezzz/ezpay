@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/util/log"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/util/log"
 	tb "gopkg.in/telebot.v3"
 	"gopkg.in/telebot.v3/middleware"
 )

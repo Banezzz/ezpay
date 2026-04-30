@@ -172,7 +172,7 @@ func selectDialIP(ips []net.IP, network string) (net.IP, error) {
 }
 
 func callbackPrivateNetworksAllowed() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("EPUSDT_ALLOW_PRIVATE_CALLBACKS")), "true")
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("EZPAY_ALLOW_PRIVATE_CALLBACKS")), "true")
 }
 
 func isBlockedCallbackIP(ip net.IP) bool {

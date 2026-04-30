@@ -5,27 +5,27 @@
 ## 1.下载源代码
 ```bash
 cd /var/www/
-mkdir epusdt
-chmod 777 -R /var/www/epusdt
-cd epusdt
-wget https://github.com/GMWalletApp/epusdt/releases/download/v0.0.3/epusdt_0.0.3_Linux_x86_64.tar.gz
-tar -xzf epusdt_0.0.3_Linux_x86_64.tar.gz
-rm epusdt_0.0.3_Linux_x86_64.tar.gz
+mkdir ezpay
+chmod 777 -R /var/www/ezpay
+cd ezpay
+wget https://github.com/Banezzz/ezpay/releases/download/v0.0.3/ezpay_0.0.3_Linux_x86_64.tar.gz
+tar -xzf ezpay_0.0.3_Linux_x86_64.tar.gz
+rm ezpay_0.0.3_Linux_x86_64.tar.gz
 ```
 ## 2.导入Sql
 - 创建sql文件
 ```bash
-nano epusdt.sql
+nano ezpay.sql
 ```
 然后复制下面的
 ```sql
 -- auto-generated definition
-use epusdt;
+use ezpay;
 create table orders
 (
     id                   int auto_increment
         primary key,
-    trade_id             varchar(32)    not null comment 'epusdt订单号',
+    trade_id             varchar(32)    not null comment 'ezpay订单号',
     order_id             varchar(32)    not null comment '客户交易id',
     block_transaction_id varchar(128)   null comment '区块唯一编号',
     actual_amount        decimal(19, 4) not null comment '订单实际需要支付的金额，保留4位小数',
@@ -78,11 +78,11 @@ EXIT
 ```
 - 导入sql文件
 ```bash
-mysql -u[用户名] -p[密码] < epusdt.sql 
+mysql -u[用户名] -p[密码] < ezpay.sql 
 ```
 ## 3.配置反向代理
 ```bash
-nano /etc/nginx/sites-enabled/epusdt
+nano /etc/nginx/sites-enabled/ezpay
 ```
 你可以参考以下我的配置文件，注意更改域名。
 ```bash
@@ -105,10 +105,10 @@ server {
 }
 
 ```
-## 4.赋予Epusdt执行权限
+## 4.赋予EZPay执行权限
 `linux`服务器需要赋予`Epust`执行权限方可启动。            
-执行命令```chmod +x epusdt```赋予权限
-## 5、配置Epusdt
+执行命令```chmod +x ezpay```赋予权限
+## 5、配置EZPay
 执行命令
 ```bash
 mv .env.example .env
@@ -116,7 +116,7 @@ nano .env
 ```
 
 ```dotenv
-app_name=epusdt
+app_name=ezpay
 #下面配置你的域名，收银台会需要
 app_uri=https://upay.dujiaoka.com
 #是否开启debug，默认false
@@ -173,29 +173,29 @@ order_expiration_time=10
 
 选填配置项：tg_bot_token、tg_manage
 ## 6、配置supervisor
-为了保证`Epusdt`常驻后台运行，我们需要配置`supervisor`来实现进程监听  
+为了保证`EZPay`常驻后台运行，我们需要配置`supervisor`来实现进程监听  
 ```bash
-nano /etc/supervisor/conf.d/epusdt.conf
+nano /etc/supervisor/conf.d/ezpay.conf
 ```
 你可以参考以下我的配置文件，注意更改路径。
 ```conf
-[program:epusdt]
-process_name=epusdt
-directory=/var/www/epusdt
-command=/var/www/epusdt/epusdt http start
+[program:ezpay]
+process_name=ezpay
+directory=/var/www/ezpay
+command=/var/www/ezpay/ezpay http start
 autostart=true
 autorestart=true
 user=www-data
 numprocs=1
 redirect_stderr=true
-stdout_logfile=/var/log/supervisor/epusdt.log
+stdout_logfile=/var/log/supervisor/ezpay.log
 ```
 接下来输入命令
 ```bash
 supervisorctl reread
 supervisorctl update
-supervisorctl start epusdt
-supervisorctl tail epusdt
+supervisorctl start ezpay
+supervisorctl tail ezpay
 ```
 出现下图，即为配置成功
 ```bash
@@ -205,9 +205,9 @@ supervisorctl tail epusdt
  | |___| |_) | |_| \__ \ (_| | |_ 
  |_____| .__/ \__,_|___/\__,_|\__|
        |_|                        
-Epusdt version(0.0.2) Powered by GMWalletApp https://github.com/GMWalletApp/epusdt
+EZPay version(0.0.2) Powered by GMWalletApp https://github.com/Banezzz/ezpay
 ⇨ http server started on [::]:8000
 ```
 ## 其他注意事项
-- 1.所有`.env`配置文件有了修改后都需要重启supervisor进程 `supervisorctl restart epusdt`
+- 1.所有`.env`配置文件有了修改后都需要重启supervisor进程 `supervisorctl restart ezpay`
 - 2.教程所示的目录均为参考，请勿1:1照抄，根据自己实际情况来

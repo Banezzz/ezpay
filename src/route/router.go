@@ -9,14 +9,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/GMWalletApp/epusdt/config"
-	"github.com/GMWalletApp/epusdt/controller/admin"
-	"github.com/GMWalletApp/epusdt/controller/comm"
-	"github.com/GMWalletApp/epusdt/middleware"
-	"github.com/GMWalletApp/epusdt/model/data"
-	"github.com/GMWalletApp/epusdt/model/mdb"
-	"github.com/GMWalletApp/epusdt/util/constant"
-	"github.com/GMWalletApp/epusdt/util/sign"
+	"github.com/GMWalletApp/ezpay/config"
+	"github.com/GMWalletApp/ezpay/controller/admin"
+	"github.com/GMWalletApp/ezpay/controller/comm"
+	"github.com/GMWalletApp/ezpay/middleware"
+	"github.com/GMWalletApp/ezpay/model/data"
+	"github.com/GMWalletApp/ezpay/model/mdb"
+	"github.com/GMWalletApp/ezpay/util/constant"
+	"github.com/GMWalletApp/ezpay/util/sign"
 	"github.com/labstack/echo/v4"
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 )
@@ -32,7 +32,7 @@ func RegisterRoute(e *echo.Echo) {
 // RegisterPublicRoutes registers only the user-facing checkout surface.
 func RegisterPublicRoutes(e *echo.Echo) {
 	e.POST("/", func(c echo.Context) error {
-		return c.String(http.StatusOK, "hello epusdt, https://github.com/GMwalletApp/epusdt")
+		return c.String(http.StatusOK, "hello ezpay, https://github.com/GMwalletApp/ezpay")
 	})
 
 	payRoute := e.Group("/pay")
