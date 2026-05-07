@@ -2,9 +2,9 @@
 /**
  * EZPay Payment Gateway Routes for Dujiaoka
  *
- * @author    Banezzz
- * @copyright Banezzz
- * @link      https://github.com/Banezzz/ezpay
+ * @author    EZPay
+ * @copyright EZPay
+ * @link      https://ezpay.infrix.org
  */
 use Illuminate\Support\Facades\Route;
 

@@ -8,11 +8,10 @@ import (
 func printBanner() {
 	color.Green.Printf("%s\n", "  _____                     _ _   \n | ____|_ __  _   _ ___  __| | |_ \n |  _| | '_ \\| | | / __|/ _` | __|\n | |___| |_) | |_| \\__ \\ (_| | |_ \n |_____| .__/ \\__,_|___/\\__,_|\\__|\n       |_|                        ")
 	color.Infof(
-		"EZPay version(%s) commit(%s) built(%s) Powered by %s %s \n",
+		"EZPay version(%s) commit(%s) built(%s) Powered by %s \n",
 		config.GetAppVersion(),
 		config.GetBuildCommit(),
 		config.GetBuildDate(),
 		"EZPay",
-		"https://github.com/Banezzz/ezpay",
 	)
 }
