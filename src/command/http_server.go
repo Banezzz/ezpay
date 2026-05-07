@@ -122,6 +122,7 @@ func registerSPA(e *echo.Echo, shouldSkip func(path string) bool) {
 			wwwRoot = filepath.Join(filepath.Dir(exePath), "www")
 		}
 	}
+	e.Use(noCacheServiceWorkerAssets)
 	e.Use(echoMiddleware.StaticWithConfig(echoMiddleware.StaticConfig{
 		Skipper: func(c echo.Context) bool {
 			return shouldSkip(c.Request().URL.Path)
@@ -130,6 +131,20 @@ func registerSPA(e *echo.Echo, shouldSkip func(path string) bool) {
 		Index: "index.html",
 		Root:  wwwRoot,
 	}))
+}
+
+func noCacheServiceWorkerAssets(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		switch c.Request().URL.Path {
+		case "/sw.js", "/registerSW.js":
+			headers := c.Response().Header()
+			headers.Set(echo.HeaderCacheControl, "no-cache, no-store, must-revalidate")
+			headers.Set("Pragma", "no-cache")
+			headers.Set("Expires", "0")
+			headers.Set("Service-Worker-Allowed", "/")
+		}
+		return next(c)
+	}
 }
 
 func isWWWRootAsset(path string) bool {
