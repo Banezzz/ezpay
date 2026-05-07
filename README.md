@@ -1,7 +1,7 @@
 # EZPay — Easy Payment USDT
 
 <p align="center">
-  <img src="https://ezpay.infrix.org/favicon.ico" alt="EZPay Logo - Multi-chain Crypto Payment Gateway" width="120">
+  <img src="src/www/images/logo.png" alt="EZPay Logo - Multi-chain Crypto Payment Gateway" width="120">
 </p>
 
 <p align="center">

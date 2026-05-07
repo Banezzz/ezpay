@@ -1,8 +1,10 @@
 .idea/
+__pycache__/
 src/runtime/
 src/.env
 src/*.db
 src/*.db-shm
 src/*.db-wal
+src/ezpay
 .DS_Store
 .env

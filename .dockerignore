@@ -1,6 +1,7 @@
 .git
 .github
 .idea
+__pycache__
 .DS_Store
 env
 src/.env
@@ -8,3 +9,4 @@ src/*.db
 src/*.db-shm
 src/*.db-wal
 src/runtime
+src/ezpay
