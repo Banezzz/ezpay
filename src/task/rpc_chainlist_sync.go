@@ -102,13 +102,15 @@ func SyncChainlistRPCs(ctx context.Context, sourceURL string) (chainlistSyncStat
 				return
 			}
 
+			nodeType := rpcNodeTypeFromURL(c.URL)
+
 			status, latency := ProbeEVMNode(c.URL)
 			mu.Lock()
 			stats.Tested++
 			mu.Unlock()
 
 			if status != mdb.RpcNodeStatusOk {
-				if err := data.UpdateRpcNodeHealthByNetworkURLType(c.Network, c.URL, mdb.RpcNodeTypeWs, status, latency); err != nil {
+				if err := data.UpdateRpcNodeHealthByNetworkURLType(c.Network, c.URL, nodeType, status, latency); err != nil {
 					log.Sugar.Warnf("[rpc-chainlist] mark down network=%s url=%s err=%v", c.Network, c.URL, err)
 				}
 				mu.Lock()
@@ -120,7 +122,7 @@ func SyncChainlistRPCs(ctx context.Context, sourceURL string) (chainlistSyncStat
 			created, err := data.UpsertRpcNodeByNetworkURLType(&mdb.RpcNode{
 				Network:       c.Network,
 				Url:           c.URL,
-				Type:          mdb.RpcNodeTypeWs,
+				Type:          nodeType,
 				Weight:        1,
 				Enabled:       true,
 				Status:        mdb.RpcNodeStatusOk,
@@ -221,6 +223,19 @@ func collectChainlistWSCandidates(chains []chainlistChain) []chainlistCandidate 
 	return out
 }
 
+func rpcNodeTypeFromURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return mdb.RpcNodeTypeHttp
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "ws", "wss":
+		return mdb.RpcNodeTypeWs
+	default:
+		return mdb.RpcNodeTypeHttp
+	}
+}
+
 func normalizeChainlistRPCURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.Contains(raw, "${") || strings.ContainsAny(raw, "{}<>") {
@@ -234,7 +249,7 @@ func normalizeChainlistRPCURL(raw string) string {
 		return ""
 	}
 	switch strings.ToLower(u.Scheme) {
-	case "ws", "wss":
+	case "ws", "wss", "http", "https":
 	default:
 		return ""
 	}
