@@ -30,13 +30,13 @@ type OrderNotifyResponse struct {
 
 // OrderNotifyResponseEpay epay订单异步回调结构体
 type OrderNotifyResponseEpay struct {
-	PID         int    `json:"pid" example:"1001"`                   // 商户ID
-	TradeNo     string `json:"trade_no" example:"T2026041612345678"` // 平台订单号
-	OutTradeNo  string `json:"out_trade_no" example:"ORD20260416001"` // 商户订单号
-	Type        string `json:"type" example:"usdt"`                  // 订单类型
-	Name        string `json:"name" example:"VIP月卡"`                 // 商品名称
-	Money       string `json:"money" example:"100.0000"`             // 订单金额，保留4位小数
-	Sign        string `json:"sign" example:"a1b2c3d4..."`           // 签名
-	SignType    string `json:"sign_type" example:"MD5"`              // 签名类型
-	TradeStatus string `json:"trade_status" example:"TRADE_SUCCESS"` // 订单状态
+	PID         int    `json:"pid" example:"1001"`                          // 商户ID
+	TradeNo     string `json:"trade_no" example:"3nQ9pL2xV7sK1mR8cT4yB_aZ"` // 平台订单号
+	OutTradeNo  string `json:"out_trade_no" example:"ORD20260416001"`       // 商户订单号
+	Type        string `json:"type" example:"usdt"`                         // 订单类型
+	Name        string `json:"name" example:"VIP月卡"`                        // 商品名称
+	Money       string `json:"money" example:"100.0000"`                    // 订单金额，保留4位小数
+	Sign        string `json:"sign" example:"a1b2c3d4..."`                  // 签名
+	SignType    string `json:"sign_type" example:"MD5"`                     // 签名类型
+	TradeStatus string `json:"trade_status" example:"TRADE_SUCCESS"`        // 订单状态
 }

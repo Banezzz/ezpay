@@ -38,6 +38,7 @@ func SetupTestDatabases(t testing.TB) func() {
 
 	mustMigrate(t, mainDB,
 		&mdb.Orders{},
+		&mdb.ProviderOrder{},
 		&mdb.WalletAddress{},
 		&mdb.ApiKey{},
 		&mdb.Setting{},
@@ -86,11 +87,11 @@ func SetupTestDatabases(t testing.TB) func() {
 	})
 	if err := dao.Mdb.Create(&mdb.Setting{
 		Group: "rate",
-		Key:   "rate.forced_usdt_rate",
-		Value: "1.0",
-		Type:  "string",
+		Key:   "rate.forced_rate_list",
+		Value: `{"cny":{"usdt":1}}`,
+		Type:  "json",
 	}).Error; err != nil {
-		t.Fatalf("seed rate.forced_usdt_rate: %v", err)
+		t.Fatalf("seed rate.forced_rate_list: %v", err)
 	}
 
 	return func() {

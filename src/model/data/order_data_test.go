@@ -1,6 +1,7 @@
 package data
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,101 @@ func TestEvmTransactionLockAddressIsCaseInsensitive(t *testing.T) {
 	}
 	if gotTradeID != "" {
 		t.Fatalf("expected lock to be released, got trade id %q", gotTradeID)
+	}
+}
+
+func TestStatsBucketExprForDialect(t *testing.T) {
+	tests := []struct {
+		name    string
+		dialect string
+		hourly  bool
+		want    string
+	}{
+		{
+			name:    "sqlite daily",
+			dialect: "sqlite",
+			want:    "substr(created_at, 1, 10)",
+		},
+		{
+			name:    "sqlite hourly",
+			dialect: "sqlite",
+			hourly:  true,
+			want:    "replace(substr(created_at, 1, 13), 'T', ' ') || ':00'",
+		},
+		{
+			name:    "postgres daily",
+			dialect: "postgres",
+			want:    "TO_CHAR(created_at, 'YYYY-MM-DD')",
+		},
+		{
+			name:    "postgres hourly",
+			dialect: "postgres",
+			hourly:  true,
+			want:    "TO_CHAR(created_at, 'YYYY-MM-DD HH24:00')",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := statsBucketExprForDialect(tt.dialect, "created_at", tt.hourly)
+			if err != nil {
+				t.Fatalf("statsBucketExprForDialect error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("bucket expr = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatsBucketExprRejectsUnsupportedDialect(t *testing.T) {
+	if _, err := statsBucketExprForDialect("mysql", "created_at", false); err == nil {
+		t.Fatal("expected unsupported mysql dialect error")
+	}
+}
+
+func TestTransactionLockPrecisionPreventsEquivalentAmountsOnly(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "2", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 2: %v", err)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress001", "USDT", "trade-old", 1.23, time.Hour); err != nil {
+		t.Fatalf("lock old transaction: %v", err)
+	}
+
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "4", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 4: %v", err)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress001", "USDT", "trade-equivalent", 1.2300, time.Hour); !errors.Is(err, ErrTransactionLocked) {
+		t.Fatalf("equivalent lock error = %v, want %v", err, ErrTransactionLocked)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress001", "USDT", "trade-new", 1.2301, time.Hour); err != nil {
+		t.Fatalf("distinct precision lock: %v", err)
+	}
+}
+
+func TestTransactionLockLookupUsesStoredPrecision(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "4", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 4: %v", err)
+	}
+	if err := LockTransaction(mdb.NetworkTron, "TPrecisionAddress002", "USDT", "trade-precise", 1.2345, time.Hour); err != nil {
+		t.Fatalf("lock precise transaction: %v", err)
+	}
+	if err := SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "2", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set precision 2: %v", err)
+	}
+
+	gotTradeID, err := GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkTron, "TPrecisionAddress002", "USDT", 1.2345)
+	if err != nil {
+		t.Fatalf("lookup transaction lock: %v", err)
+	}
+	if gotTradeID != "trade-precise" {
+		t.Fatalf("trade id = %q, want trade-precise", gotTradeID)
 	}
 }
 

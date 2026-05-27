@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,7 +27,7 @@ func newCreateTransactionRequest(orderID string, amount float64) *request.Create
 		Token:     "USDT",
 		Network:   "tron",
 		Amount:    amount,
-		NotifyUrl: "https://merchant.example/callback",
+		NotifyUrl: "https://93.184.216.34/callback",
 	}
 }
 
@@ -34,6 +35,31 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func TestGenerateCodeFormat(t *testing.T) {
+	tradeID := GenerateCode()
+
+	if len(tradeID) != 24 {
+		t.Fatalf("trade id length = %d, want 24", len(tradeID))
+	}
+	if strings.Contains(tradeID, "=") {
+		t.Fatalf("trade id = %q, contains padding '='", tradeID)
+	}
+	for _, ch := range tradeID {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' {
+			continue
+		}
+		t.Fatalf("trade id = %q, contains non URL-safe character %q", tradeID, ch)
+	}
+
+	decoded, err := base64.RawURLEncoding.DecodeString(tradeID)
+	if err != nil {
+		t.Fatalf("decode trade id %q: %v", tradeID, err)
+	}
+	if len(decoded) != 18 {
+		t.Fatalf("decoded trade id length = %d, want 18", len(decoded))
+	}
 }
 
 func installMockHTTPClient(t *testing.T, handler roundTripFunc) {
@@ -48,6 +74,15 @@ func installMockHTTPClient(t *testing.T, handler roundTripFunc) {
 	t.Cleanup(func() {
 		http_client.ClientFactory = oldFactory
 	})
+}
+
+func TestCreateTransactionRejectsPrivateNotifyURL(t *testing.T) {
+	req := newCreateTransactionRequest("order_private_notify_url", 1)
+	req.NotifyUrl = "http://127.0.0.1/notify"
+
+	if _, err := CreateTransaction(req, nil); err != constant.NotifyURLErr {
+		t.Fatalf("CreateTransaction error = %v, want %v", err, constant.NotifyURLErr)
+	}
 }
 
 func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
@@ -94,6 +129,59 @@ func TestCreateTransactionAssignsIncrementedAmountsAndLocks(t *testing.T) {
 	}
 	if tradeID2 != resp2.TradeId {
 		t.Fatalf("second runtime lock = %s, want %s", tradeID2, resp2.TradeId)
+	}
+}
+
+func TestCreateTransactionUsesConfiguredAmountPrecision(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := data.SetSetting(mdb.SettingGroupSystem, mdb.SettingKeyAmountPrecision, "4", mdb.SettingTypeInt); err != nil {
+		t.Fatalf("set amount precision: %v", err)
+	}
+	if _, err := data.AddWalletAddress("wallet_precision_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+
+	resp1, err := CreateTransaction(newCreateTransactionRequest("order_precision_1", 1), nil)
+	if err != nil {
+		t.Fatalf("create first transaction: %v", err)
+	}
+	resp2, err := CreateTransaction(newCreateTransactionRequest("order_precision_2", 1), nil)
+	if err != nil {
+		t.Fatalf("create second transaction: %v", err)
+	}
+
+	if got := fmt.Sprintf("%.4f", resp1.ActualAmount); got != "1.0000" {
+		t.Fatalf("first actual amount = %s, want 1.0000", got)
+	}
+	if got := fmt.Sprintf("%.4f", resp2.ActualAmount); got != "1.0001" {
+		t.Fatalf("second actual amount = %s, want 1.0001", got)
+	}
+}
+
+func TestCreateTransactionStoresNormalizedMerchantAmount(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("wallet_normalized_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+
+	resp, err := CreateTransaction(newCreateTransactionRequest("order_normalized_1", 100.129), nil)
+	if err != nil {
+		t.Fatalf("create transaction: %v", err)
+	}
+	if got := fmt.Sprintf("%.2f", resp.Amount); got != "100.13" {
+		t.Fatalf("response amount = %s, want 100.13", got)
+	}
+
+	order, err := data.GetOrderInfoByTradeId(resp.TradeId)
+	if err != nil {
+		t.Fatalf("load order: %v", err)
+	}
+	if got := fmt.Sprintf("%.2f", order.Amount); got != "100.13" {
+		t.Fatalf("stored amount = %s, want 100.13", got)
 	}
 }
 
@@ -207,8 +295,8 @@ func TestCreateTransactionUsesRateAPIWhenForcedSettingIsNotPositive(t *testing.T
 		}, nil
 	})
 
-	if err := data.SetSetting("rate", "rate.forced_usdt_rate", "0", "string"); err != nil {
-		t.Fatalf("set rate.forced_usdt_rate: %v", err)
+	if err := data.SetSetting("rate", "rate.forced_rate_list", `{"cny":{"usdt":0}}`, "json"); err != nil {
+		t.Fatalf("set rate.forced_rate_list: %v", err)
 	}
 	if err := data.SetSetting("rate", "rate.api_url", "https://rate.example.test", "string"); err != nil {
 		t.Fatalf("set rate.api_url: %v", err)
@@ -230,8 +318,8 @@ func TestCreateTransactionFailsWhenRateAPIUnavailableAndForcedSettingIsNotPositi
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
 
-	if err := data.SetSetting("rate", "rate.forced_usdt_rate", "0", "string"); err != nil {
-		t.Fatalf("set rate.forced_usdt_rate: %v", err)
+	if err := data.SetSetting("rate", "rate.forced_rate_list", `{"cny":{"usdt":0}}`, "json"); err != nil {
+		t.Fatalf("set rate.forced_rate_list: %v", err)
 	}
 	if err := data.SetSetting("rate", "rate.api_url", "", "string"); err != nil {
 		t.Fatalf("clear rate.api_url: %v", err)
@@ -702,6 +790,81 @@ func TestOrderProcessingSubOrderPaidParentKeepsOwnFields(t *testing.T) {
 	}
 	if parent.CallBackConfirm != mdb.CallBackConfirmNo {
 		t.Fatalf("parent callback_confirm = %d, want %d (callback must be queued)", parent.CallBackConfirm, mdb.CallBackConfirmNo)
+	}
+}
+
+func TestOrderProcessingParentDirectPayExpiresOkPayProviderOrder(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("TTestTronAddress001"); err != nil {
+		t.Fatalf("add tron wallet: %v", err)
+	}
+
+	parentReq := newCreateTransactionRequest("order_parent_direct_okpay_expire", 1)
+	parentReq.Network = mdb.NetworkTron
+	parentResp, err := CreateTransaction(parentReq, nil)
+	if err != nil {
+		t.Fatalf("create parent order: %v", err)
+	}
+
+	subOrder := &mdb.Orders{
+		TradeId:         "okpay_sub_parent_direct_expire",
+		OrderId:         "okpay_sub_parent_direct_expire",
+		ParentTradeId:   parentResp.TradeId,
+		Amount:          parentResp.Amount,
+		Currency:        parentResp.Currency,
+		ActualAmount:    0.15,
+		ReceiveAddress:  "OKPAY",
+		Token:           "USDT",
+		Network:         mdb.NetworkTron,
+		Status:          mdb.StatusWaitPay,
+		NotifyUrl:       "",
+		CallBackConfirm: mdb.CallBackConfirmOk,
+		PayProvider:     mdb.PaymentProviderOkPay,
+	}
+	if err := dao.Mdb.Create(subOrder).Error; err != nil {
+		t.Fatalf("create okpay sub-order: %v", err)
+	}
+	providerRow := &mdb.ProviderOrder{
+		TradeId:         subOrder.TradeId,
+		Provider:        mdb.PaymentProviderOkPay,
+		ProviderOrderID: "okp-parent-direct-expire",
+		PayURL:          "https://t.me/ExampleWalletBot?start=shop_deposit--okpay-order-parent-direct-expire",
+		Amount:          subOrder.ActualAmount,
+		Coin:            subOrder.Token,
+		Status:          mdb.ProviderOrderStatusPending,
+	}
+	if err := dao.Mdb.Create(providerRow).Error; err != nil {
+		t.Fatalf("create provider row: %v", err)
+	}
+
+	err = OrderProcessing(&request.OrderProcessingRequest{
+		ReceiveAddress:     parentResp.ReceiveAddress,
+		Token:              strings.ToUpper(parentResp.Token),
+		Network:            mdb.NetworkTron,
+		TradeId:            parentResp.TradeId,
+		Amount:             parentResp.ActualAmount,
+		BlockTransactionId: "block_parent_direct_okpay_expire",
+	})
+	if err != nil {
+		t.Fatalf("order processing parent direct pay: %v", err)
+	}
+
+	expiredSub, err := data.GetOrderInfoByTradeId(subOrder.TradeId)
+	if err != nil {
+		t.Fatalf("reload sub-order: %v", err)
+	}
+	if expiredSub.Status != mdb.StatusExpired {
+		t.Fatalf("sub-order status = %d, want %d", expiredSub.Status, mdb.StatusExpired)
+	}
+
+	expiredProviderRow, err := data.GetProviderOrderByTradeIDAndProvider(subOrder.TradeId, mdb.PaymentProviderOkPay)
+	if err != nil {
+		t.Fatalf("reload provider row: %v", err)
+	}
+	if expiredProviderRow.Status != mdb.ProviderOrderStatusExpired {
+		t.Fatalf("provider row status = %q, want %q", expiredProviderRow.Status, mdb.ProviderOrderStatusExpired)
 	}
 }
 

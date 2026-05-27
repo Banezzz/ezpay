@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/csv"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,13 +12,10 @@ import (
 	"github.com/Banezzz/ezpay/model/mdb"
 	"github.com/Banezzz/ezpay/model/request"
 	"github.com/Banezzz/ezpay/model/service"
+	"github.com/Banezzz/ezpay/util/constant"
+	"github.com/Banezzz/ezpay/util/log"
 	"github.com/labstack/echo/v4"
 )
-
-// MarkPaidRequest is the payload for manually marking an order as paid.
-type MarkPaidRequest struct {
-	BlockTransactionId string `json:"block_transaction_id" validate:"required" example:"0xabc123def456..."`
-}
 
 // OrderListResponse wraps the paginated order list.
 type OrderListResponse struct {
@@ -92,7 +88,7 @@ func (c *BaseAdminController) GetOrder(ctx echo.Context) error {
 		return c.FailJson(ctx, err)
 	}
 	if order.ID == 0 {
-		return c.FailJson(ctx, errors.New("order not found"))
+		return c.FailJson(ctx, constant.OrderNotExists)
 	}
 	return c.SucJson(ctx, order)
 }
@@ -114,17 +110,17 @@ func (c *BaseAdminController) CloseOrder(ctx echo.Context) error {
 		return c.FailJson(ctx, err)
 	}
 	if order.ID == 0 {
-		return c.FailJson(ctx, errors.New("order not found"))
+		return c.FailJson(ctx, constant.OrderNotExists)
 	}
 	if order.Status != mdb.StatusWaitPay {
-		return c.FailJson(ctx, errors.New("order is not waiting payment"))
+		return c.FailJson(ctx, constant.OrderNotWaitPay)
 	}
 	ok, err := data.CloseOrderManually(tradeID)
 	if err != nil {
 		return c.FailJson(ctx, err)
 	}
 	if !ok {
-		return c.FailJson(ctx, errors.New("close failed (concurrent state change)"))
+		return c.FailJson(ctx, constant.OrderStatusConflict)
 	}
 	// Release the transaction lock so the amount slot becomes reusable.
 	_ = data.UnLockTransaction(order.Network, order.ReceiveAddress, order.Token, order.ActualAmount)
@@ -141,41 +137,29 @@ func (c *BaseAdminController) CloseOrder(ctx echo.Context) error {
 // @Accept       json
 // @Produce      json
 // @Param        trade_id path string true "Trade ID"
-// @Param        request body admin.MarkPaidRequest true "Block transaction ID"
+// @Param        request body request.ManualPaymentRequest true "Block transaction ID"
 // @Success      200 {object} response.ApiResponse
 // @Failure      400 {object} response.ApiResponse
 // @Router       /admin/api/v1/orders/{trade_id}/mark-paid [post]
 func (c *BaseAdminController) MarkOrderPaid(ctx echo.Context) error {
 	tradeID := ctx.Param("trade_id")
-	req := new(MarkPaidRequest)
+	adminUserID := currentAdminUserID(ctx)
+	req := new(request.ManualPaymentRequest)
 	if err := ctx.Bind(req); err != nil {
-		return c.FailJson(ctx, err)
+		log.Sugar.Warnf("[admin-order] mark-paid bind failed admin_user_id=%d trade_id=%s err=%v", adminUserID, tradeID, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
+	req.BlockTransactionId = strings.TrimSpace(req.BlockTransactionId)
 	if err := c.ValidateStruct(ctx, req); err != nil {
+		log.Sugar.Warnf("[admin-order] mark-paid validation failed admin_user_id=%d trade_id=%s block_transaction_id=%s err=%v", adminUserID, tradeID, req.BlockTransactionId, err)
 		return c.FailJson(ctx, err)
 	}
-	order, err := data.GetOrderInfoByTradeId(tradeID)
+	resp, err := service.SubmitManualPayment(tradeID, req.BlockTransactionId)
 	if err != nil {
+		log.Sugar.Warnf("[admin-order] mark-paid failed admin_user_id=%d trade_id=%s block_transaction_id=%s err=%v", adminUserID, tradeID, req.BlockTransactionId, err)
 		return c.FailJson(ctx, err)
 	}
-	if order.ID == 0 {
-		return c.FailJson(ctx, errors.New("order not found"))
-	}
-	if order.Status != mdb.StatusWaitPay {
-		return c.FailJson(ctx, errors.New("order is not waiting payment"))
-	}
-	err = service.OrderProcessing(&request.OrderProcessingRequest{
-		ReceiveAddress:     order.ReceiveAddress,
-		Currency:           order.Currency,
-		Token:              order.Token,
-		Network:            order.Network,
-		Amount:             order.ActualAmount,
-		TradeId:            order.TradeId,
-		BlockTransactionId: req.BlockTransactionId,
-	})
-	if err != nil {
-		return c.FailJson(ctx, err)
-	}
+	log.Sugar.Infof("[admin-order] mark-paid success admin_user_id=%d trade_id=%s block_transaction_id=%s", adminUserID, tradeID, resp.BlockTransactionId)
 	return c.SucJson(ctx, nil)
 }
 
@@ -193,13 +177,38 @@ func (c *BaseAdminController) MarkOrderPaid(ctx echo.Context) error {
 // @Router       /admin/api/v1/orders/{trade_id}/resend-callback [post]
 func (c *BaseAdminController) ResendCallback(ctx echo.Context) error {
 	tradeID := ctx.Param("trade_id")
+	adminUserID := currentAdminUserID(ctx)
+	order, err := data.GetOrderInfoByTradeId(tradeID)
+	if err != nil {
+		log.Sugar.Warnf("[admin-order] resend-callback load failed admin_user_id=%d trade_id=%s err=%v", adminUserID, tradeID, err)
+		return c.FailJson(ctx, err)
+	}
+	if order.ID == 0 {
+		err = constant.OrderNotExists
+		log.Sugar.Warnf("[admin-order] resend-callback rejected admin_user_id=%d trade_id=%s err=%v", adminUserID, tradeID, err)
+		return c.FailJson(ctx, err)
+	}
+	if order.Status != mdb.StatusPaySuccess {
+		err = constant.OrderCallbackNotApplicable
+		log.Sugar.Warnf("[admin-order] resend-callback rejected admin_user_id=%d trade_id=%s status=%d err=%v", adminUserID, tradeID, order.Status, err)
+		return c.FailJson(ctx, err)
+	}
+	if strings.TrimSpace(order.NotifyUrl) == "" {
+		err = constant.OrderNotifyURLEmptyErr
+		log.Sugar.Warnf("[admin-order] resend-callback rejected admin_user_id=%d trade_id=%s err=%v", adminUserID, tradeID, err)
+		return c.FailJson(ctx, err)
+	}
 	ok, err := data.ReopenOrderCallback(tradeID)
 	if err != nil {
+		log.Sugar.Warnf("[admin-order] resend-callback reopen failed admin_user_id=%d trade_id=%s err=%v", adminUserID, tradeID, err)
 		return c.FailJson(ctx, err)
 	}
 	if !ok {
-		return c.FailJson(ctx, errors.New("order is not paid (callback not applicable)"))
+		err = constant.OrderResendCallbackErr
+		log.Sugar.Warnf("[admin-order] resend-callback rejected admin_user_id=%d trade_id=%s err=%v", adminUserID, tradeID, err)
+		return c.FailJson(ctx, err)
 	}
+	log.Sugar.Infof("[admin-order] resend-callback queued admin_user_id=%d trade_id=%s", adminUserID, tradeID)
 	return c.SucJson(ctx, nil)
 }
 
@@ -380,7 +389,7 @@ func (c *BaseAdminController) GetOrderWithSub(ctx echo.Context) error {
 		return c.FailJson(ctx, err)
 	}
 	if order.ID == 0 {
-		return c.FailJson(ctx, errors.New("order not found"))
+		return c.FailJson(ctx, constant.OrderNotExists)
 	}
 	subOrders, err := data.GetAllSubOrders(tradeID)
 	if err != nil {

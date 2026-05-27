@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"errors"
+	"github.com/Banezzz/ezpay/util/constant"
 	"github.com/Banezzz/ezpay/util/http"
 	"github.com/gookit/validate"
 	"github.com/gookit/validate/locales/zhcn"
@@ -46,6 +46,6 @@ func (c *BaseController) ValidateStruct(ctx echo.Context, i interface{}, scene .
 	if v.Validate() {
 		return nil
 	} else {
-		return errors.New(v.Errors.One())
+		return constant.ParamsMarshalErr
 	}
 }

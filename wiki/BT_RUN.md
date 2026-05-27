@@ -12,65 +12,8 @@
 将提前解析好的收银台域名绑定。     
 ![新增网站](img/add_web.png)
 
-### 二、导入Sql
-登录管理刚刚新增数据库，导入`EZPay`所需的sql文件。 
-
-以下为示范0.01版本 最新数据库请以 https://github.com/Banezzz/ezpay/blob/master/sql/ 为准
-
-#### 1.手动下载导入
-
-数据库地址:https://github.com/Banezzz/ezpay/blob/master/sql/v0.0.1.sql
-![导入Sql](img/sql.png)
-
-#### 2.使用phpMyAdmin导入
-使用文本编辑器打开`.sql`文件，如下：      
-```sql
--- auto-generated definition
-create table orders
-(
-    id                   int auto_increment
-        primary key,
-    trade_id             varchar(32)    not null comment 'ezpay订单号',
-    order_id             varchar(32)    not null comment '客户交易id',
-    block_transaction_id varchar(128)   null comment '区块唯一编号',
-    actual_amount        decimal(19, 4) not null comment '订单实际需要支付的金额，保留4位小数',
-    amount               decimal(19, 4) not null comment '订单金额，保留4位小数',
-    token                varchar(50)    not null comment '所属钱包地址',
-    status               int default 1  not null comment '1：等待支付，2：支付成功，3：已过期',
-    notify_url           varchar(128)   not null comment '异步回调地址',
-    redirect_url         varchar(128)   null comment '同步回调地址',
-    callback_num         int default 0  null comment '回调次数',
-    callback_confirm     int default 2  null comment '回调是否已确认？ 1是 2否',
-    created_at           timestamp      null,
-    updated_at           timestamp      null,
-    deleted_at           timestamp      null,
-    constraint orders_order_id_uindex
-        unique (order_id),
-    constraint orders_trade_id_uindex
-        unique (trade_id)
-);
-
-create index orders_block_transaction_id_index
-    on orders (block_transaction_id);
-
--- auto-generated definition
-create table wallet_address
-(
-    id         int auto_increment
-        primary key,
-    token      varchar(50)   not null comment '钱包token',
-    status     int default 1 not null comment '1:启用 2:禁用',
-    created_at timestamp     null,
-    updated_at timestamp     null,
-    deleted_at timestamp     null
-)
-    comment '钱包表';
-
-create index wallet_address_token_index
-    on wallet_address (token);
-```
-复制-粘贴至`phpmyadmin`的SQL面板，然后执行       
-![导入Sql](img/run_sql.png)
+### 二、数据库说明
+当前版本无需手动导入 SQL 文件。配置好数据库连接后，EZPay 启动时会自动创建和升级所需表结构。
 
 ### 三、配置EZPay
 1.将编译好的`EZPay`项目压缩包上传至刚刚新增的网站目录，随后解压。    
@@ -136,7 +79,7 @@ api_auth_token=
 #订单过期时间(单位分钟)
 order_expiration_time=10
 
-#汇率相关配置请在后台“系统配置 -> 汇率配置”中设置
+#汇率相关配置请在后台"系统配置 -> 汇率配置"中设置
 ```
 4. ⚠️注意：配置文件里面不认识的不要修改，留空即可，不会改又要瞎改，除非你对项目源代码很熟悉很有信心😁
 
@@ -148,7 +91,7 @@ order_expiration_time=10
 ![反向代理](img/fanxiang.png)
 
 ### 五、赋予EZPay执行权限
-`linux`服务器需要赋予`Epust`执行权限方可启动。      
+`linux`服务器需要赋予`EZPay`执行权限方可启动。      
 1.通过`ssh`进入服务器终端      
 2.进入`ezpay`可执行文件所在目录（目录位置可以参考宝塔面板的网站根目录）       
 3.执行命令```chmod +x ezpay```赋予权限(根据你的实际目录来，不用一比一抄我的，每个人的目录都不一样)     

@@ -23,9 +23,14 @@ type PendingCallbackOrder struct {
 	UpdatedAt       carbon.Time `gorm:"column:updated_at"`
 }
 
+func normalizeAmount(amount float64, precision int) (int64, string) {
+	precision = NormalizeAmountPrecision(precision)
+	value := decimal.NewFromFloat(amount).Round(int32(precision))
+	return value.Shift(int32(precision)).IntPart(), value.StringFixed(int32(precision))
+}
+
 func normalizeLockAmount(amount float64) (int64, string) {
-	value := decimal.NewFromFloat(amount).Round(2)
-	return value.Shift(2).IntPart(), value.StringFixed(2)
+	return normalizeAmount(amount, GetAmountPrecision())
 }
 
 func normalizeLockNetwork(network string) string {
@@ -53,6 +58,30 @@ func applyLockAddressFilter(tx *gorm.DB, network, address string) *gorm.DB {
 	return tx.Where("address = ?", address)
 }
 
+func activeLocksForAddress(tx *gorm.DB, network, address, token string, now time.Time) *gorm.DB {
+	query := tx.Model(&mdb.TransactionLock{}).
+		Where("network = ?", normalizeLockNetwork(network)).
+		Where("token = ?", normalizeLockToken(token)).
+		Where("expires_at > ?", now)
+	return applyLockAddressFilter(query, network, address)
+}
+
+func lockMatchesAmount(lock mdb.TransactionLock, amount float64) bool {
+	precision := NormalizeAmountPrecision(lock.AmountPrecision)
+	scaledAmount, _ := normalizeAmount(amount, precision)
+	return lock.AmountScaled == scaledAmount
+}
+
+func lockAmountDecimal(lock mdb.TransactionLock) decimal.Decimal {
+	if strings.TrimSpace(lock.AmountText) != "" {
+		if value, err := decimal.NewFromString(lock.AmountText); err == nil {
+			return value
+		}
+	}
+	precision := NormalizeAmountPrecision(lock.AmountPrecision)
+	return decimal.NewFromInt(lock.AmountScaled).Shift(int32(-precision))
+}
+
 // GetOrderInfoByOrderId fetches an order by merchant order id.
 func GetOrderInfoByOrderId(orderId string) (*mdb.Orders, error) {
 	order := new(mdb.Orders)
@@ -76,6 +105,56 @@ func CreateOrderWithTransaction(tx *gorm.DB, order *mdb.Orders) error {
 func GetOrderByBlockIdWithTransaction(tx *gorm.DB, blockID string) (*mdb.Orders, error) {
 	order := new(mdb.Orders)
 	err := tx.Model(order).Limit(1).Find(order, "block_transaction_id = ?", blockID).Error
+	return order, err
+}
+
+// GetOrderByBlockTransactionIDs fetches the first order whose stored tx id
+// matches any equivalent spelling supplied by the caller.
+func GetOrderByBlockTransactionIDs(blockIDs []string) (*mdb.Orders, error) {
+	order := new(mdb.Orders)
+	seen := make(map[string]struct{}, len(blockIDs))
+	candidates := make([]string, 0, len(blockIDs))
+	for _, blockID := range blockIDs {
+		blockID = strings.TrimSpace(blockID)
+		if blockID == "" {
+			continue
+		}
+		if _, ok := seen[blockID]; ok {
+			continue
+		}
+		seen[blockID] = struct{}{}
+		candidates = append(candidates, blockID)
+	}
+	if len(candidates) == 0 {
+		return order, nil
+	}
+	err := dao.Mdb.Model(order).Where("block_transaction_id IN ?", candidates).Limit(1).Find(order).Error
+	return order, err
+}
+
+// GetOrderByBlockTransactionIDsCaseInsensitive fetches the first order whose
+// stored tx id matches any candidate after ASCII case folding. This is used
+// only for hex-based chain tx ids; case-sensitive signatures must keep using
+// GetOrderByBlockTransactionIDs.
+func GetOrderByBlockTransactionIDsCaseInsensitive(blockIDs []string) (*mdb.Orders, error) {
+	order := new(mdb.Orders)
+	seen := make(map[string]struct{}, len(blockIDs))
+	candidates := make([]string, 0, len(blockIDs))
+	for _, blockID := range blockIDs {
+		blockID = strings.ToLower(strings.TrimSpace(blockID))
+		if blockID == "" {
+			continue
+		}
+		if _, ok := seen[blockID]; ok {
+			continue
+		}
+		seen[blockID] = struct{}{}
+		candidates = append(candidates, blockID)
+	}
+	if len(candidates) == 0 {
+		return order, nil
+	}
+	err := dao.Mdb.Model(order).Where("LOWER(block_transaction_id) IN ?", candidates).Limit(1).Find(order).Error
 	return order, err
 }
 
@@ -202,6 +281,18 @@ func MarkOrderSelected(tradeId string) error {
 		Update("is_selected", true).Error
 }
 
+// ExpireOrderByTradeID marks a waiting order as expired. Used to retire failed
+// child-order attempts that should not remain selectable/reusable.
+func ExpireOrderByTradeID(tradeId string) error {
+	return dao.Mdb.Model(&mdb.Orders{}).
+		Where("trade_id = ?", tradeId).
+		Where("status = ?", mdb.StatusWaitPay).
+		Updates(map[string]interface{}{
+			"status":      mdb.StatusExpired,
+			"is_selected": false,
+		}).Error
+}
+
 // RefreshOrderExpiration resets created_at to now so the expiration timer restarts.
 // Called on the parent order when a sub-order is created or returned.
 func RefreshOrderExpiration(tradeId string) error {
@@ -266,45 +357,43 @@ func ExpireOrderByTradeId(tradeId string) error {
 func GetTradeIdByWalletAddressAndAmountAndToken(network string, address string, token string, amount float64) (string, error) {
 	network = normalizeLockNetwork(network)
 	address = normalizeLockAddress(network, address)
-	scaledAmount, _ := normalizeLockAmount(amount)
-	var lock mdb.TransactionLock
-	query := dao.RuntimeDB.Model(&mdb.TransactionLock{}).
-		Where("network = ?", network).
-		Where("token = ?", normalizeLockToken(token)).
-		Where("amount_scaled = ?", scaledAmount).
-		Where("expires_at > ?", time.Now())
-	query = applyLockAddressFilter(query, network, address)
-	err := query.Limit(1).Find(&lock).Error
+	var locks []mdb.TransactionLock
+	err := activeLocksForAddress(dao.RuntimeDB, network, address, token, time.Now()).
+		Order("created_at ASC").
+		Find(&locks).Error
 	if err != nil {
 		return "", err
 	}
-	if lock.ID <= 0 {
-		return "", nil
+	for _, lock := range locks {
+		if lockMatchesAmount(lock, amount) {
+			return lock.TradeId, nil
+		}
 	}
-	return lock.TradeId, nil
+	return "", nil
 }
 
 // LockTransaction reserves a network+address+token+amount pair in sqlite until expiration.
 func LockTransaction(network, address, token, tradeID string, amount float64, expirationTime time.Duration) error {
 	network = normalizeLockNetwork(network)
 	address = normalizeLockAddress(network, address)
-	scaledAmount, amountText := normalizeLockAmount(amount)
+	precision := GetAmountPrecision()
+	scaledAmount, amountText := normalizeAmount(amount, precision)
 	normalizedToken := normalizeLockToken(token)
 	now := time.Now()
 	lock := &mdb.TransactionLock{
-		Network:      network,
-		Address:      address,
-		Token:        normalizedToken,
-		AmountScaled: scaledAmount,
-		AmountText:   amountText,
-		TradeId:      tradeID,
-		ExpiresAt:    now.Add(expirationTime),
+		Network:         network,
+		Address:         address,
+		Token:           normalizedToken,
+		AmountScaled:    scaledAmount,
+		AmountText:      amountText,
+		AmountPrecision: precision,
+		TradeId:         tradeID,
+		ExpiresAt:       now.Add(expirationTime),
 	}
 
 	return dao.RuntimeDB.Transaction(func(tx *gorm.DB) error {
 		expiredQuery := tx.Where("network = ?", network).
 			Where("token = ?", normalizedToken).
-			Where("amount_scaled = ?", scaledAmount).
 			Where("expires_at <= ?", now)
 		expiredQuery = applyLockAddressFilter(expiredQuery, network, address)
 		if err := expiredQuery.Delete(&mdb.TransactionLock{}).Error; err != nil {
@@ -312,6 +401,18 @@ func LockTransaction(network, address, token, tradeID string, amount float64, ex
 		}
 		if err := tx.Where("trade_id = ?", tradeID).Delete(&mdb.TransactionLock{}).Error; err != nil {
 			return err
+		}
+
+		var existing []mdb.TransactionLock
+		if err := activeLocksForAddress(tx, network, address, normalizedToken, now).
+			Find(&existing).Error; err != nil {
+			return err
+		}
+		candidateAmount := lockAmountDecimal(*lock)
+		for _, item := range existing {
+			if lockAmountDecimal(item).Equal(candidateAmount) {
+				return ErrTransactionLocked
+			}
 		}
 
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(lock)
@@ -329,13 +430,21 @@ func LockTransaction(network, address, token, tradeID string, amount float64, ex
 func UnLockTransaction(network string, address string, token string, amount float64) error {
 	network = normalizeLockNetwork(network)
 	address = normalizeLockAddress(network, address)
-	scaledAmount, _ := normalizeLockAmount(amount)
-	query := dao.RuntimeDB.
-		Where("network = ?", network).
-		Where("token = ?", normalizeLockToken(token)).
-		Where("amount_scaled = ?", scaledAmount)
-	query = applyLockAddressFilter(query, network, address)
-	return query.Delete(&mdb.TransactionLock{}).Error
+	var locks []mdb.TransactionLock
+	if err := activeLocksForAddress(dao.RuntimeDB, network, address, token, time.Now()).
+		Find(&locks).Error; err != nil {
+		return err
+	}
+	ids := make([]uint64, 0, len(locks))
+	for _, lock := range locks {
+		if lockMatchesAmount(lock, amount) {
+			ids = append(ids, lock.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return dao.RuntimeDB.Where("id IN ?", ids).Delete(&mdb.TransactionLock{}).Error
 }
 
 func UnLockTransactionByTradeId(tradeID string) error {

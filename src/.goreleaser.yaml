@@ -15,7 +15,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X github.com/Banezzz/ezpay/config.BuildVersion={{ .Version }} -X github.com/Banezzz/ezpay/config.BuildCommit={{ .Commit }} -X github.com/Banezzz/ezpay/config.BuildDate={{ .Date }}
+      - -s -w -X github.com/Banezzz/ezpay/config.BuildVersion={{ .Tag }} -X github.com/Banezzz/ezpay/config.BuildCommit={{ .Commit }} -X github.com/Banezzz/ezpay/config.BuildDate={{ .Date }}
     goos:
       - linux
       - darwin

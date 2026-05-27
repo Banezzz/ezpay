@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,14 @@ import (
 
 // gProcessedSignatures 已处理签名缓存，避免重复调用 getTransaction
 var gProcessedSignatures sync.Map // sig -> unix timestamp
+
+var processSolanaOrder = OrderProcessing
+
+var (
+	solRPCRetryCount   = 5
+	solRPCRetryWait    = 2 * time.Second
+	solRPCRetryMaxWait = 10 * time.Second
+)
 
 type TransferInfo struct {
 	Source      string  // Source address (for SOL) or source ATA (for SPL tokens)
@@ -150,6 +159,7 @@ func SolCallBack(address string, wg *sync.WaitGroup) {
 	// Process each transaction signature
 	for sigIdx, txSig := range result {
 		sig := txSig.Signature
+		retrySignature := false
 
 		// Skip failed transactions
 		if txSig.Err != nil {
@@ -213,6 +223,7 @@ func SolCallBack(address string, wg *sync.WaitGroup) {
 			tradeID, err := data.GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkSolana, address, token, amount)
 			if err != nil {
 				log.Sugar.Errorf("[SOL][%s] sig=%s query transaction_lock failed: %v", address, sig, err)
+				retrySignature = true
 				continue
 			}
 			if tradeID == "" {
@@ -226,6 +237,7 @@ func SolCallBack(address string, wg *sync.WaitGroup) {
 			order, err := data.GetOrderInfoByTradeId(tradeID)
 			if err != nil {
 				log.Sugar.Errorf("[SOL][%s] sig=%s load order failed for trade_id=%s: %v", address, sig, tradeID, err)
+				retrySignature = true
 				continue
 			}
 			log.Sugar.Infof("[SOL][%s] order loaded: trade_id=%s order_id=%s status=%d created_at_ms=%d",
@@ -252,13 +264,14 @@ func SolCallBack(address string, wg *sync.WaitGroup) {
 			}
 			log.Sugar.Infof("[SOL][%s] calling OrderProcessing: trade_id=%s sig=%s token=%s amount=%.2f",
 				address, tradeID, sig, token, amount)
-			err = OrderProcessing(req)
+			err = processSolanaOrder(req)
 			if err != nil {
 				if errors.Is(err, constant.OrderBlockAlreadyProcess) || errors.Is(err, constant.OrderStatusConflict) {
 					log.Sugar.Infof("[SOL][%s] sig=%s already resolved: trade_id=%s reason=%v", address, sig, tradeID, err)
 					continue
 				}
 				log.Sugar.Errorf("[SOL][%s] sig=%s OrderProcessing failed for trade_id=%s: %v", address, sig, tradeID, err)
+				retrySignature = true
 				continue
 			}
 
@@ -266,6 +279,11 @@ func SolCallBack(address string, wg *sync.WaitGroup) {
 				address, tradeID, sig, token, amount)
 			sendPaymentNotification(order)
 			log.Sugar.Infof("[SOL][%s] payment fully processed: trade_id=%s sig=%s", address, tradeID, sig)
+		}
+
+		if retrySignature {
+			log.Sugar.Debugf("[SOL][%s] sig=%s not marked processed because retryable processing failed", address, sig)
+			continue
 		}
 
 		// 标记已处理
@@ -282,26 +300,74 @@ type solSignatureResult struct {
 }
 
 func resolveSolanaRpcURL() (string, error) {
-	node, err := data.SelectRpcNode(mdb.NetworkSolana, mdb.RpcNodeTypeHttp)
+	node, err := resolveSolanaRpcNode()
 	if err != nil {
 		return "", err
 	}
+	rpcURL := strings.TrimSpace(node.Url)
+	return rpcURL, nil
+}
+
+func resolveSolanaRpcNode(excludeIDs ...uint64) (*mdb.RpcNode, error) {
+	node, err := data.SelectGeneralRpcNode(mdb.NetworkSolana, mdb.RpcNodeTypeHttp, excludeIDs...)
+	if err != nil {
+		return nil, err
+	}
 	if node == nil || node.ID == 0 {
-		return "", fmt.Errorf("no enabled %s %s RPC node configured in rpc_nodes", mdb.NetworkSolana, mdb.RpcNodeTypeHttp)
+		return nil, fmt.Errorf("no enabled %s %s RPC node configured in rpc_nodes", mdb.NetworkSolana, mdb.RpcNodeTypeHttp)
 	}
 	rpcURL := strings.TrimSpace(node.Url)
 	if rpcURL == "" {
-		return "", fmt.Errorf("rpc_nodes id=%d has empty url", node.ID)
+		return nil, fmt.Errorf("rpc_nodes id=%d has empty url", node.ID)
 	}
-	return rpcURL, nil
+	node.Url = rpcURL
+	return node, nil
 }
 
 // SolRetryClient 发送 Solana JSON-RPC 请求，自动重试
 func SolRetryClient(method string, params []interface{}) ([]byte, error) {
+	tried := make([]uint64, 0, 3)
+	var lastErr error
+	for attempts := 0; attempts < 3; attempts++ {
+		node, err := resolveSolanaRpcNode(tried...)
+		if err != nil {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, err
+		}
+		if len(tried) > 0 {
+			log.Sugar.Warnf("[SOL] trying alternate RPC node method=%s node=%s", method, data.RpcNodeLogLabel(*node))
+		}
+
+		body, err := solRetryClientWithURL(node.Url, method, params)
+		if err == nil {
+			data.RecordRpcNodeSuccess(node.ID)
+			return body, nil
+		}
+
+		lastErr = err
+		failures, cooling := data.RecordRpcNodeFailure(node.ID)
+		nodeLabel := data.RpcNodeLogLabel(*node)
+		if !cooling {
+			log.Sugar.Warnf("[SOL] RPC node failed method=%s node=%s failures=%d/%d", method, nodeLabel, failures, data.RpcFailoverThreshold)
+			return nil, err
+		}
+		log.Sugar.Warnf("[SOL] RPC node reached fail threshold method=%s node=%s, trying another node", method, nodeLabel)
+		tried = append(tried, node.ID)
+	}
+	return nil, lastErr
+}
+
+func solRetryClientWithURL(rpcUrl string, method string, params []interface{}) ([]byte, error) {
+	return solRetryClientWithURLHeaders(rpcUrl, method, params, nil)
+}
+
+func solRetryClientWithURLHeaders(rpcUrl string, method string, params []interface{}, headers http.Header) ([]byte, error) {
 	client := resty.New()
-	client.SetRetryCount(5)
-	client.SetRetryWaitTime(2 * time.Second)
-	client.SetRetryMaxWaitTime(10 * time.Second)
+	client.SetRetryCount(solRPCRetryCount)
+	client.SetRetryWaitTime(solRPCRetryWait)
+	client.SetRetryMaxWaitTime(solRPCRetryMaxWait)
 	client.AddRetryCondition(func(r *resty.Response, err error) bool {
 		if err != nil {
 			return true
@@ -312,25 +378,35 @@ func SolRetryClient(method string, params []interface{}) ([]byte, error) {
 		return false
 	})
 
-	rpcUrl, err := resolveSolanaRpcURL()
-	if err != nil {
-		return nil, err
+	req := client.R().SetHeader("Content-Type", "application/json")
+	for key, values := range headers {
+		for _, value := range values {
+			req.SetHeader(key, value)
+		}
 	}
 
-	resp, err := client.R().
-		SetHeader("Content-Type", "application/json").
-		SetBody(map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      1,
-			"method":  method,
-			"params":  params,
-		}).
+	resp, err := req.SetBody(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  method,
+		"params":  params,
+	}).
 		Post(rpcUrl)
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode() >= http.StatusBadRequest {
+		return nil, fmt.Errorf("solana rpc HTTP %d", resp.StatusCode())
+	}
 
 	respBody := resp.Body()
+	if errValue := gjson.GetBytes(respBody, "error"); errValue.Exists() && errValue.Type != gjson.Null {
+		code := errValue.Get("code").String()
+		if code == "" {
+			code = "unknown"
+		}
+		return nil, fmt.Errorf("solana rpc error code=%s", code)
+	}
 
 	return respBody, nil
 }
@@ -376,6 +452,33 @@ func SolGetTransaction(sig string) ([]byte, error) {
 			"maxSupportedTransactionVersion": 0, // suport
 		},
 	})
+	if err != nil {
+		log.Sugar.Errorf("SolRetryClient failed: %v", err)
+		return nil, err
+	}
+
+	errField := gjson.GetBytes(txData, "result.meta.err")
+	if errField.Exists() && errField.Type != gjson.Null {
+		log.Sugar.Warnf("Transaction failed: %v", errField.String())
+		return nil, fmt.Errorf("transaction failed: %s", errField.String())
+	}
+
+	return txData, nil
+}
+
+func solGetTransactionWithURL(rpcURL string, sig string) ([]byte, error) {
+	return solGetTransactionWithURLHeaders(rpcURL, sig, nil)
+}
+
+func solGetTransactionWithURLHeaders(rpcURL string, sig string, headers http.Header) ([]byte, error) {
+	txData, err := solRetryClientWithURLHeaders(rpcURL, "getTransaction", []interface{}{
+		sig,
+		map[string]interface{}{
+			"encoding":                       "jsonParsed",
+			"commitment":                     "confirmed",
+			"maxSupportedTransactionVersion": 0, // suport
+		},
+	}, headers)
 	if err != nil {
 		log.Sugar.Errorf("SolRetryClient failed: %v", err)
 		return nil, err
@@ -471,7 +574,7 @@ const (
 	Token2022ProgramID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 )
 
-// ADJustAmount 将链上原始金额转为可读金额（除以 10^decimals，保留 2 位小数）
+// ADJustAmount 将链上原始金额转为可读金额（除以 10^decimals，保留到系统支持的最大匹配精度）
 func ADJustAmount(amount uint64, decimals int) float64 {
 	if amount == 0 {
 		return 0
@@ -480,8 +583,7 @@ func ADJustAmount(amount uint64, decimals int) float64 {
 	// 10^decimals
 	decimalDivisor := decimal.New(1, int32(decimals))
 	adjustedAmount := decimalAmount.Div(decimalDivisor)
-	// Round to 2 decimal places
-	return math.MustParsePrecFloat64(adjustedAmount.InexactFloat64(), 2)
+	return math.MustParsePrecFloat64(adjustedAmount.InexactFloat64(), data.MaxAmountPrecision)
 }
 
 func MatchUsdtAtaAddress(address string, ataTo string) bool {

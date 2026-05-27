@@ -8,8 +8,9 @@ WORKDIR /app
 COPY . /app
 
 WORKDIR /app/src
+ARG BUILD_VERSION=0.0.0-dev
 RUN go mod download
-RUN go build -o /app/ezpay .
+RUN go build -trimpath -ldflags="-s -w -X github.com/Banezzz/ezpay/config.BuildVersion=${BUILD_VERSION}" -o /app/ezpay .
 
 FROM alpine:3.22 AS runner
 ENV TZ=Asia/Shanghai

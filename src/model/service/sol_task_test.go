@@ -2,12 +2,19 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Banezzz/ezpay/internal/testutil"
 	"github.com/Banezzz/ezpay/model/dao"
+	"github.com/Banezzz/ezpay/model/data"
 	"github.com/Banezzz/ezpay/model/mdb"
+	"github.com/Banezzz/ezpay/model/request"
 	"github.com/tidwall/gjson"
 )
 
@@ -21,6 +28,7 @@ func setupSolanaRPCNode(t *testing.T, url string) func() {
 		Type:    mdb.RpcNodeTypeHttp,
 		Weight:  1,
 		Enabled: true,
+		Purpose: mdb.RpcNodePurposeGeneral,
 		Status:  mdb.RpcNodeStatusOk,
 	}
 	if err := dao.Mdb.Create(node).Error; err != nil {
@@ -52,6 +60,396 @@ func TestResolveSolanaRpcURLWithRow(t *testing.T) {
 	}
 }
 
+func TestResolveSolanaRpcURLIgnoresManualVerifyOnly(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := dao.Mdb.Create(&mdb.RpcNode{
+		Network: mdb.NetworkSolana,
+		Url:     "https://paid-solana.example.com",
+		Type:    mdb.RpcNodeTypeHttp,
+		Weight:  100,
+		Enabled: true,
+		Purpose: mdb.RpcNodePurposeManualVerify,
+		Status:  mdb.RpcNodeStatusOk,
+	}).Error; err != nil {
+		t.Fatalf("seed manual rpc_node: %v", err)
+	}
+
+	if got, err := resolveSolanaRpcURL(); err == nil {
+		t.Fatalf("resolveSolanaRpcURL() = %q, nil; want error", got)
+	}
+}
+
+func TestResolveSolanaRpcURLUsesGeneralWhenManualVerifyExists(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	rows := []mdb.RpcNode{
+		{Network: mdb.NetworkSolana, Url: "https://paid-solana.example.com", Type: mdb.RpcNodeTypeHttp, Weight: 100, Enabled: true, Purpose: mdb.RpcNodePurposeManualVerify, Status: mdb.RpcNodeStatusOk},
+		{Network: mdb.NetworkSolana, Url: " https://general-solana.example.com ", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusOk},
+	}
+	if err := dao.Mdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed rpc_nodes: %v", err)
+	}
+
+	got, err := resolveSolanaRpcURL()
+	if err != nil {
+		t.Fatalf("resolveSolanaRpcURL(): %v", err)
+	}
+	if got != "https://general-solana.example.com" {
+		t.Fatalf("resolveSolanaRpcURL() = %q, want general node", got)
+	}
+}
+
+func TestSolRetryClientSwitchesAfterFailureThreshold(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+	data.ResetRpcFailoverForTest()
+	t.Cleanup(data.ResetRpcFailoverForTest)
+	oldRetryCount := solRPCRetryCount
+	oldRetryWait := solRPCRetryWait
+	oldRetryMaxWait := solRPCRetryMaxWait
+	solRPCRetryCount = 0
+	solRPCRetryWait = time.Millisecond
+	solRPCRetryMaxWait = time.Millisecond
+	t.Cleanup(func() {
+		solRPCRetryCount = oldRetryCount
+		solRPCRetryWait = oldRetryWait
+		solRPCRetryMaxWait = oldRetryMaxWait
+	})
+
+	var primaryCalls int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalls++
+		http.Error(w, "temporary", http.StatusBadGateway)
+	}))
+	defer primary.Close()
+
+	var backupCalls int
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backupCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  "ok",
+		})
+	}))
+	defer backup.Close()
+
+	rows := []mdb.RpcNode{
+		{Network: mdb.NetworkSolana, Url: primary.URL, Type: mdb.RpcNodeTypeHttp, Weight: 100, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusOk},
+		{Network: mdb.NetworkSolana, Url: backup.URL, Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusOk},
+	}
+	if err := dao.Mdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed rpc_nodes: %v", err)
+	}
+
+	for i := 0; i < data.RpcFailoverThreshold-1; i++ {
+		if _, err := SolRetryClient("getHealth", nil); err == nil {
+			t.Fatalf("SolRetryClient attempt %d unexpectedly succeeded", i+1)
+		}
+	}
+	if backupCalls != 0 {
+		t.Fatalf("backup calls before threshold = %d, want 0", backupCalls)
+	}
+
+	body, err := SolRetryClient("getHealth", nil)
+	if err != nil {
+		t.Fatalf("SolRetryClient after threshold: %v", err)
+	}
+	if gjson.GetBytes(body, "result").String() != "ok" {
+		t.Fatalf("response body = %s, want result ok", string(body))
+	}
+	if backupCalls == 0 {
+		t.Fatal("backup RPC was not called after threshold")
+	}
+	if primaryCalls == 0 {
+		t.Fatal("primary RPC was not called")
+	}
+}
+
+func TestSolRetryClientCountsJSONRPCErrorAsNodeFailure(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+	data.ResetRpcFailoverForTest()
+	t.Cleanup(data.ResetRpcFailoverForTest)
+	oldRetryCount := solRPCRetryCount
+	oldRetryWait := solRPCRetryWait
+	oldRetryMaxWait := solRPCRetryMaxWait
+	solRPCRetryCount = 0
+	solRPCRetryWait = time.Millisecond
+	solRPCRetryMaxWait = time.Millisecond
+	t.Cleanup(func() {
+		solRPCRetryCount = oldRetryCount
+		solRPCRetryWait = oldRetryWait
+		solRPCRetryMaxWait = oldRetryMaxWait
+	})
+
+	var primaryCalls int
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"error": map[string]interface{}{
+				"code": -32005,
+			},
+		})
+	}))
+	defer primary.Close()
+
+	var backupCalls int
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backupCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  "ok",
+		})
+	}))
+	defer backup.Close()
+
+	rows := []mdb.RpcNode{
+		{Network: mdb.NetworkSolana, Url: primary.URL, Type: mdb.RpcNodeTypeHttp, Weight: 100, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusOk},
+		{Network: mdb.NetworkSolana, Url: backup.URL, Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusOk},
+	}
+	if err := dao.Mdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed rpc_nodes: %v", err)
+	}
+
+	for i := 0; i < data.RpcFailoverThreshold-1; i++ {
+		if _, err := SolRetryClient("getHealth", nil); err == nil {
+			t.Fatalf("SolRetryClient attempt %d unexpectedly succeeded", i+1)
+		}
+	}
+	body, err := SolRetryClient("getHealth", nil)
+	if err != nil {
+		t.Fatalf("SolRetryClient after JSON-RPC error threshold: %v", err)
+	}
+	if gjson.GetBytes(body, "result").String() != "ok" {
+		t.Fatalf("response body = %s, want result ok", string(body))
+	}
+	if primaryCalls < data.RpcFailoverThreshold {
+		t.Fatalf("primary calls = %d, want at least threshold", primaryCalls)
+	}
+	if backupCalls == 0 {
+		t.Fatal("backup RPC was not called after JSON-RPC error threshold")
+	}
+}
+
+func TestSolRetryClientWithURLHeadersForwardsCustomHeaders(t *testing.T) {
+	oldRetryCount := solRPCRetryCount
+	oldRetryWait := solRPCRetryWait
+	oldRetryMaxWait := solRPCRetryMaxWait
+	solRPCRetryCount = 0
+	solRPCRetryWait = time.Millisecond
+	solRPCRetryMaxWait = time.Millisecond
+	t.Cleanup(func() {
+		solRPCRetryCount = oldRetryCount
+		solRPCRetryWait = oldRetryWait
+		solRPCRetryMaxWait = oldRetryMaxWait
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Test-Header"); got != "test-value" {
+			t.Errorf("X-Test-Header = %q, want test-value", got)
+			http.Error(w, "bad custom header", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  "ok",
+		})
+	}))
+	defer server.Close()
+
+	headers := http.Header{}
+	headers.Set("X-Test-Header", "test-value")
+	body, err := solRetryClientWithURLHeaders(server.URL, "getHealth", nil, headers)
+	if err != nil {
+		t.Fatalf("solRetryClientWithURLHeaders(): %v", err)
+	}
+	if gjson.GetBytes(body, "result").String() != "ok" {
+		t.Fatalf("response body = %s, want result ok", string(body))
+	}
+}
+
+func TestSolRetryClientWithURLDoesNotForwardUserIPByDefault(t *testing.T) {
+	oldRetryCount := solRPCRetryCount
+	oldRetryWait := solRPCRetryWait
+	oldRetryMaxWait := solRPCRetryMaxWait
+	solRPCRetryCount = 0
+	solRPCRetryWait = time.Millisecond
+	solRPCRetryMaxWait = time.Millisecond
+	t.Cleanup(func() {
+		solRPCRetryCount = oldRetryCount
+		solRPCRetryWait = oldRetryWait
+		solRPCRetryMaxWait = oldRetryMaxWait
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-USER-IP"); got != "" {
+			t.Errorf("X-USER-IP header = %q, want empty", got)
+			http.Error(w, "unexpected user ip header", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result":  "ok",
+		})
+	}))
+	defer server.Close()
+
+	body, err := solRetryClientWithURL(server.URL, "getHealth", nil)
+	if err != nil {
+		t.Fatalf("solRetryClientWithURL(): %v", err)
+	}
+	if gjson.GetBytes(body, "result").String() != "ok" {
+		t.Fatalf("response body = %s, want result ok", string(body))
+	}
+}
+
+func TestSolCallBackDoesNotCacheSignatureAfterRetryableOrderProcessingError(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+	clearProcessedSignatures()
+	t.Cleanup(clearProcessedSignatures)
+
+	const (
+		address = "2uFTf9TZ8gd7Kg6hkb79TxfaeNpaAgpJ8uVHguv2Yweu"
+		sig     = "retryable-sol-signature"
+		tradeID = "sol-retryable-order-001"
+		amount  = 1.23
+	)
+	blockTime := time.Now().Add(time.Minute).Unix()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rpcReq struct {
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&rpcReq); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch rpcReq.Method {
+		case "getSignaturesForAddress":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      1,
+				"result": []map[string]interface{}{
+					{
+						"signature": sig,
+						"slot":      1,
+						"err":       nil,
+						"blockTime": blockTime,
+					},
+				},
+			})
+		case "getTransaction":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"jsonrpc": "2.0",
+				"id":      1,
+				"result": map[string]interface{}{
+					"blockTime": blockTime,
+					"meta":      map[string]interface{}{"err": nil},
+					"transaction": map[string]interface{}{
+						"message": map[string]interface{}{
+							"instructions": []map[string]interface{}{
+								{
+									"programId": SystemProgramID,
+									"parsed": map[string]interface{}{
+										"type": "transfer",
+										"info": map[string]interface{}{
+											"source":      "source-wallet",
+											"destination": address,
+											"lamports":    1_230_000_000,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			})
+		default:
+			http.Error(w, "unexpected method "+rpcReq.Method, http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	if err := dao.Mdb.Create(&mdb.RpcNode{
+		Network: mdb.NetworkSolana,
+		Url:     server.URL,
+		Type:    mdb.RpcNodeTypeHttp,
+		Weight:  1,
+		Enabled: true,
+		Status:  mdb.RpcNodeStatusOk,
+	}).Error; err != nil {
+		t.Fatalf("seed solana rpc_node: %v", err)
+	}
+	if err := dao.Mdb.Create(&mdb.ChainToken{
+		Network:         mdb.NetworkSolana,
+		Symbol:          "SOL",
+		ContractAddress: "",
+		Decimals:        SOL_Decimals,
+		Enabled:         true,
+	}).Error; err != nil {
+		t.Fatalf("seed SOL chain token: %v", err)
+	}
+	order := &mdb.Orders{
+		TradeId:        tradeID,
+		OrderId:        "merchant-sol-retryable-001",
+		Amount:         100,
+		Currency:       "CNY",
+		ActualAmount:   amount,
+		ReceiveAddress: address,
+		Token:          "SOL",
+		Network:        mdb.NetworkSolana,
+		Status:         mdb.StatusWaitPay,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("seed order: %v", err)
+	}
+	if err := data.LockTransaction(mdb.NetworkSolana, address, "SOL", tradeID, amount, time.Hour); err != nil {
+		t.Fatalf("lock transaction: %v", err)
+	}
+
+	oldProcessSolanaOrder := processSolanaOrder
+	calls := 0
+	processSolanaOrder = func(req *request.OrderProcessingRequest) error {
+		calls++
+		if req.TradeId != tradeID {
+			t.Fatalf("order processing trade_id = %q, want %q", req.TradeId, tradeID)
+		}
+		return errors.New("temporary database error")
+	}
+	t.Cleanup(func() {
+		processSolanaOrder = oldProcessSolanaOrder
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	SolCallBack(address, &wg)
+	wg.Wait()
+
+	if calls != 1 {
+		t.Fatalf("order processing calls = %d, want 1", calls)
+	}
+	if _, ok := gProcessedSignatures.Load(sig); ok {
+		t.Fatalf("signature %s was cached after retryable order processing error", sig)
+	}
+}
+
 func TestSolClientHealthy(t *testing.T) {
 	requireSolanaIntegration(t)
 
@@ -76,6 +474,13 @@ func TestSolClientHealthy(t *testing.T) {
 	if status != "ok" {
 		t.Errorf("Expected health status 'ok', got '%s'", status)
 	}
+}
+
+func clearProcessedSignatures() {
+	gProcessedSignatures.Range(func(key, value interface{}) bool {
+		gProcessedSignatures.Delete(key)
+		return true
+	})
 }
 
 func TestSolClientGetSignaturesForAddress(t *testing.T) {
@@ -236,7 +641,7 @@ func TestAdjustAmount(t *testing.T) {
 			name:     "USDT amount (6 decimals)",
 			amount:   123456789,
 			decimals: 6,
-			want:     123.46,
+			want:     123.456789,
 		},
 		{
 			name:     "USDC amount (6 decimals)",
@@ -260,7 +665,7 @@ func TestAdjustAmount(t *testing.T) {
 			name:     "Small amount",
 			amount:   1,
 			decimals: 6,
-			want:     0.0,
+			want:     0.000001,
 		},
 	}
 

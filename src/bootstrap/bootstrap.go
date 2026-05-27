@@ -44,9 +44,11 @@ func InitApp() {
 		}
 		if isNew {
 			color.Yellow.Println("╔════════════════════════════════════════════════════════════════════════╗")
-			color.Yellow.Println("║  Default admin account created. Store this one-time password safely.  ║")
-			color.Yellow.Printf("║  Username: admin                                                       ║\n")
-			color.Yellow.Printf("║  Password: %-58s║\n", initialPassword)
+			color.Yellow.Println("║  Default admin account created. Save these credentials now.           ║")
+			color.Yellow.Printf("║  Username: %-54s║\n", "admin")
+			color.Yellow.Printf("║  Password: %-54s║\n", initialPassword)
+			color.Yellow.Println("║  The one-time password API remains available until first fetch.       ║")
+			color.Yellow.Println("║  GET /admin/api/v1/auth/init-password (one-time)                      ║")
 			color.Yellow.Println("╚════════════════════════════════════════════════════════════════════════╝")
 		}
 		if _, err := appjwt.EnsureSecret(); err != nil {

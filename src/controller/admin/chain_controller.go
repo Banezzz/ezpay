@@ -2,6 +2,7 @@ package admin
 
 import (
 	"github.com/Banezzz/ezpay/model/data"
+	"github.com/Banezzz/ezpay/util/constant"
 	"github.com/labstack/echo/v4"
 )
 
@@ -49,7 +50,7 @@ func (c *BaseAdminController) UpdateChain(ctx echo.Context) error {
 	network := ctx.Param("network")
 	req := new(UpdateChainRequest)
 	if err := ctx.Bind(req); err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	fields := map[string]interface{}{}
 	if req.Enabled != nil {

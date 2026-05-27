@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Banezzz/ezpay/config"
 	"github.com/Banezzz/ezpay/model/mdb"
 	"github.com/gookit/color"
 	"gorm.io/gorm/clause"
@@ -35,6 +36,7 @@ func MdbTableInit() {
 			{"Chain", &mdb.Chain{}},
 			{"ChainToken", &mdb.ChainToken{}},
 			{"RpcNode", &mdb.RpcNode{}},
+			{"ProviderOrder", &mdb.ProviderOrder{}},
 		}
 		for _, m := range migrations {
 			if err := Mdb.AutoMigrate(m.model); err != nil {
@@ -44,6 +46,7 @@ func MdbTableInit() {
 		}
 
 		seedChains()
+		backfillRpcNodePurpose()
 		seedRpcNodes()
 		seedChainTokens()
 		seedDefaultSettings()
@@ -104,14 +107,7 @@ func seedChainTokens() {
 // seedRpcNodes inserts default RPC endpoints for each chain. Checks per
 // (network, url) so re-runs are idempotent and admin edits persist.
 func seedRpcNodes() {
-	defaults := []mdb.RpcNode{
-		{Network: mdb.NetworkTron, Url: "https://api.trongrid.io", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Status: mdb.RpcNodeStatusUnknown},
-		{Network: mdb.NetworkEthereum, Url: "wss://ethereum.publicnode.com", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Status: mdb.RpcNodeStatusUnknown},
-		{Network: mdb.NetworkSolana, Url: "https://api.mainnet-beta.solana.com", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Status: mdb.RpcNodeStatusUnknown},
-		{Network: mdb.NetworkBsc, Url: "wss://bsc.drpc.org", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Status: mdb.RpcNodeStatusUnknown},
-		{Network: mdb.NetworkPolygon, Url: "wss://polygon-bor-rpc.publicnode.com", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Status: mdb.RpcNodeStatusUnknown},
-		{Network: mdb.NetworkPlasma, Url: "wss://rpc.plasma.to", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Status: mdb.RpcNodeStatusUnknown},
-	}
+	defaults := defaultRpcNodes()
 	for _, d := range defaults {
 		var count int64
 		if err := Mdb.Model(&mdb.RpcNode{}).
@@ -129,13 +125,46 @@ func seedRpcNodes() {
 	}
 }
 
+func defaultRpcNodes() []mdb.RpcNode {
+	defaults := []mdb.RpcNode{
+		{Network: mdb.NetworkTron, Url: "https://api.trongrid.io", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkEthereum, Url: "wss://ethereum.publicnode.com", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkSolana, Url: "https://api.mainnet-beta.solana.com", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkBsc, Url: "wss://bsc.drpc.org", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkPolygon, Url: "wss://polygon-bor-rpc.publicnode.com", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkPlasma, Url: "wss://rpc.plasma.to", Type: mdb.RpcNodeTypeWs, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeGeneral, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkEthereum, Url: "https://rpc.epusdt.com/ethereum", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeManualVerify, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkBsc, Url: "https://rpc.epusdt.com/binance", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeManualVerify, Status: mdb.RpcNodeStatusUnknown},
+		{Network: mdb.NetworkPolygon, Url: "https://rpc.epusdt.com/polygon", Type: mdb.RpcNodeTypeHttp, Weight: 1, Enabled: true, Purpose: mdb.RpcNodePurposeManualVerify, Status: mdb.RpcNodeStatusUnknown},
+	}
+	return defaults
+}
+
+func backfillRpcNodePurpose() {
+	if err := Mdb.Model(&mdb.RpcNode{}).
+		Where("purpose = '' OR purpose IS NULL").
+		Update("purpose", mdb.RpcNodePurposeGeneral).Error; err != nil {
+		color.Red.Printf("[store_db] backfill rpc_nodes purpose err=%s\n", err)
+	}
+}
+
 // seedDefaultSettings inserts built-in default settings.
 // Uses ON CONFLICT DO NOTHING so admin edits persist across restarts.
 func seedDefaultSettings() {
+	okPayCallbackURL := strings.TrimRight(strings.TrimSpace(config.GetAppUri()), "/")
+	if okPayCallbackURL != "" {
+		okPayCallbackURL += "/payments/okpay/v1/notify"
+	}
 	defaults := []mdb.Setting{
+		{Group: mdb.SettingGroupSystem, Key: mdb.SettingKeyAmountPrecision, Value: "2", Type: mdb.SettingTypeInt},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultToken, Value: "usdt", Type: mdb.SettingTypeString},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultCurrency, Value: "cny", Type: mdb.SettingTypeString},
 		{Group: mdb.SettingGroupEpay, Key: mdb.SettingKeyEpayDefaultNetwork, Value: "tron", Type: mdb.SettingTypeString},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayEnabled, Value: "false", Type: mdb.SettingTypeBool},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayAPIURL, Value: "https://api.okaypay.me/shop/", Type: mdb.SettingTypeString},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayCallbackURL, Value: okPayCallbackURL, Type: mdb.SettingTypeString},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayTimeoutSeconds, Value: "10", Type: mdb.SettingTypeInt},
+		{Group: mdb.SettingGroupOkPay, Key: mdb.SettingKeyOkPayAllowTokens, Value: "USDT,TRX", Type: mdb.SettingTypeString},
 	}
 	if err := Mdb.Clauses(clause.OnConflict{DoNothing: true}).Create(&defaults).Error; err != nil {
 		color.Red.Printf("[store_db] seed default settings err=%s\n", err)

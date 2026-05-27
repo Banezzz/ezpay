@@ -8,6 +8,7 @@ import (
 	"github.com/Banezzz/ezpay/model/dao"
 	"github.com/Banezzz/ezpay/model/data"
 	"github.com/Banezzz/ezpay/model/mdb"
+	"github.com/Banezzz/ezpay/util/constant"
 	"github.com/labstack/echo/v4"
 )
 
@@ -112,7 +113,7 @@ func (c *BaseAdminController) AdminListWallets(ctx echo.Context) error {
 func (c *BaseAdminController) AdminAddWallet(ctx echo.Context) error {
 	req := new(AdminAddWalletRequest)
 	if err := ctx.Bind(req); err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	if err := c.ValidateStruct(ctx, req); err != nil {
 		return c.FailJson(ctx, err)
@@ -147,14 +148,14 @@ func (c *BaseAdminController) AdminAddWallet(ctx echo.Context) error {
 func (c *BaseAdminController) AdminGetWallet(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	wallet, err := data.GetWalletAddressById(id)
 	if err != nil {
 		return c.FailJson(ctx, err)
 	}
 	if wallet.ID == 0 {
-		return c.FailJson(ctx, errors.New("wallet not found"))
+		return c.FailJson(ctx, constant.WalletNotFoundErr)
 	}
 	counts, _ := data.CountOrdersByAddress()
 	return c.SucJson(ctx, WalletListItem{
@@ -178,11 +179,11 @@ func (c *BaseAdminController) AdminGetWallet(ctx echo.Context) error {
 func (c *BaseAdminController) AdminUpdateWallet(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	req := new(AdminUpdateWalletRequest)
 	if err := ctx.Bind(req); err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	fields := map[string]interface{}{}
 	if req.Remark != nil {
@@ -212,11 +213,11 @@ func (c *BaseAdminController) AdminUpdateWallet(ctx echo.Context) error {
 func (c *BaseAdminController) AdminChangeWalletStatus(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	req := new(AdminChangeWalletStatusRequest)
 	if err := ctx.Bind(req); err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	if err := c.ValidateStruct(ctx, req); err != nil {
 		return c.FailJson(ctx, err)
@@ -240,7 +241,7 @@ func (c *BaseAdminController) AdminChangeWalletStatus(ctx echo.Context) error {
 func (c *BaseAdminController) AdminDeleteWallet(ctx echo.Context) error {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	if err := data.DeleteWalletAddressById(id); err != nil {
 		return c.FailJson(ctx, err)
@@ -295,7 +296,7 @@ func (c *BaseAdminController) AdminBatchDeleteWallets(ctx echo.Context) error {
 // them all as observation wallets. Per-row failures are collected and
 // returned so the UI can surface which addresses already existed.
 // @Summary      Batch import wallets
-// @Description  Import multiple wallet addresses at once. Per-row status is returned.
+// @Description  Import multiple wallet addresses at once. Per-row status is returned; failed rows include error_code for frontend i18n.
 // @Tags         Admin Wallets
 // @Security     AdminJWT
 // @Accept       json
@@ -307,21 +308,23 @@ func (c *BaseAdminController) AdminBatchDeleteWallets(ctx echo.Context) error {
 func (c *BaseAdminController) AdminBatchImportWallets(ctx echo.Context) error {
 	req := new(AdminBatchImportRequest)
 	if err := ctx.Bind(req); err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	if err := c.ValidateStruct(ctx, req); err != nil {
 		return c.FailJson(ctx, err)
 	}
 	type result struct {
-		Address string `json:"address"`
-		OK      bool   `json:"ok"`
-		Error   string `json:"error,omitempty"`
+		Address   string `json:"address"`
+		OK        bool   `json:"ok"`
+		ErrorCode int    `json:"error_code,omitempty"`
+		Error     string `json:"error,omitempty"`
 	}
 	out := make([]result, 0, len(req.Addresses))
 	for _, addr := range req.Addresses {
 		row, err := data.AddWalletAddressWithNetwork(req.Network, addr)
 		if err != nil {
-			out = append(out, result{Address: addr, OK: false, Error: err.Error()})
+			code, msg := constant.ResolveErrno(err)
+			out = append(out, result{Address: addr, OK: false, ErrorCode: code, Error: msg})
 			continue
 		}
 		_ = dao.Mdb.Model(&mdb.WalletAddress{}).Where("id = ?", row.ID).

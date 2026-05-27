@@ -2,15 +2,20 @@ package route
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Banezzz/ezpay/config"
 	"github.com/Banezzz/ezpay/model/dao"
 	"github.com/Banezzz/ezpay/model/data"
 	"github.com/Banezzz/ezpay/model/mdb"
+	"github.com/Banezzz/ezpay/model/service"
+	"github.com/Banezzz/ezpay/util/constant"
 	"github.com/labstack/echo/v4"
 )
 
@@ -334,13 +339,30 @@ func TestAdminInitPasswordFlow(t *testing.T) {
 	if fetchData["password"] != initPassword {
 		t.Fatalf("expected initial password %s, got %v", initPassword, fetchData["password"])
 	}
+	var plaintextRows int64
+	if err := dao.Mdb.Unscoped().
+		Model(&mdb.Setting{}).
+		Where("`key` = ?", mdb.SettingKeyInitAdminPasswordPlain).
+		Count(&plaintextRows).Error; err != nil {
+		t.Fatalf("count init password plaintext rows: %v", err)
+	}
+	if plaintextRows != 0 {
+		t.Fatalf("expected init password plaintext to be hard-deleted, got %d rows", plaintextRows)
+	}
 
 	recFetch2 := doLocalGet(e, "/admin/api/v1/auth/init-password")
 	if recFetch2.Code != http.StatusBadRequest {
 		t.Fatalf("second fetch should fail with 400, got %d body=%s", recFetch2.Code, recFetch2.Body.String())
 	}
-	if !strings.Contains(strings.ToLower(recFetch2.Body.String()), "already fetched") {
-		t.Fatalf("expected already fetched error, got: %s", recFetch2.Body.String())
+	var respFetch2 map[string]interface{}
+	if err := json.Unmarshal(recFetch2.Body.Bytes(), &respFetch2); err != nil {
+		t.Fatalf("unmarshal second fetch response: %v", err)
+	}
+	if got := int(respFetch2["status_code"].(float64)); got != 10040 {
+		t.Fatalf("second fetch status_code = %d, want 10040; response=%v", got, respFetch2)
+	}
+	if got, _ := respFetch2["message"].(string); got != constant.Errno[10040] {
+		t.Fatalf("second fetch message = %q, want %q; response=%v", got, constant.Errno[10040], respFetch2)
 	}
 
 	token := adminLogin(t, e, testAdminUsername, initPassword)
@@ -523,14 +545,25 @@ func TestAdminRpcNodes_CRUD(t *testing.T) {
 	if nodeID == nil {
 		t.Fatal("CreateRpcNode missing id")
 	}
+	if got, _ := dataObj["purpose"].(string); got != mdb.RpcNodePurposeGeneral {
+		t.Fatalf("created purpose = %q, want %q", got, mdb.RpcNodePurposeGeneral)
+	}
 	nodeIDStr := fmt.Sprintf("%.0f", nodeID.(float64))
 
 	// Update.
 	rec = doPatchAdmin(e, "/admin/api/v1/rpc-nodes/"+nodeIDStr, map[string]interface{}{
-		"url": "https://eth-mainnet2.example.com",
+		"url":     "https://eth-mainnet2.example.com",
+		"purpose": mdb.RpcNodePurposeManualVerify,
 	}, token)
 	t.Logf("UpdateRpcNode: %s", rec.Body.String())
 	assertOK(t, rec)
+	updatedNode, err := data.GetRpcNodeByID(uint64(nodeID.(float64)))
+	if err != nil {
+		t.Fatalf("reload rpc node: %v", err)
+	}
+	if updatedNode.Purpose != mdb.RpcNodePurposeManualVerify {
+		t.Fatalf("updated purpose = %q, want %q", updatedNode.Purpose, mdb.RpcNodePurposeManualVerify)
+	}
 
 	// Health check — network likely unreachable in test, but route must not 404/500.
 	rec = doPostAdmin(e, "/admin/api/v1/rpc-nodes/"+nodeIDStr+"/health-check", nil, token)
@@ -543,6 +576,95 @@ func TestAdminRpcNodes_CRUD(t *testing.T) {
 	rec = doDeleteAdmin(e, "/admin/api/v1/rpc-nodes/"+nodeIDStr, token)
 	t.Logf("DeleteRpcNode: %s", rec.Body.String())
 	assertOK(t, rec)
+}
+
+func TestAdminRpcNodes_RejectsURLTypeMismatch(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPostAdmin(e, "/admin/api/v1/rpc-nodes", map[string]interface{}{
+		"network": "ethereum",
+		"url":     "wss://eth-mainnet.example.com",
+		"type":    mdb.RpcNodeTypeHttp,
+	}, token)
+	t.Logf("CreateRpcNode(http with wss): status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected create mismatch to fail, got 200: %s", rec.Body.String())
+	}
+	assertErrorCode(t, rec, 10022)
+
+	rec = doPostAdmin(e, "/admin/api/v1/rpc-nodes", map[string]interface{}{
+		"network": "ethereum",
+		"url":     "https://eth-mainnet.example.com",
+		"type":    mdb.RpcNodeTypeWs,
+	}, token)
+	t.Logf("CreateRpcNode(ws with https): status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected create mismatch to fail, got 200: %s", rec.Body.String())
+	}
+	assertErrorCode(t, rec, 10023)
+
+	rec = doPostAdmin(e, "/admin/api/v1/rpc-nodes", map[string]interface{}{
+		"network": "ethereum",
+		"url":     "https://eth-mainnet.example.com",
+		"type":    mdb.RpcNodeTypeHttp,
+		"purpose": "invalid-purpose",
+	}, token)
+	t.Logf("CreateRpcNode(invalid purpose): status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected invalid purpose to fail, got 200: %s", rec.Body.String())
+	}
+	assertErrorCode(t, rec, 10020)
+
+	rec = doPostAdmin(e, "/admin/api/v1/rpc-nodes", map[string]interface{}{
+		"network": "ethereum",
+		"url":     "https://eth-mainnet.example.com",
+		"type":    mdb.RpcNodeTypeHttp,
+	}, token)
+	resp := assertOK(t, rec)
+	dataObj, _ := resp["data"].(map[string]interface{})
+	nodeID := uint64(dataObj["id"].(float64))
+	nodeIDStr := fmt.Sprintf("%d", nodeID)
+
+	rec = doPatchAdmin(e, "/admin/api/v1/rpc-nodes/"+nodeIDStr, map[string]interface{}{
+		"url": "wss://eth-mainnet.example.com",
+	}, token)
+	t.Logf("UpdateRpcNode(http with wss): status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected update mismatch to fail, got 200: %s", rec.Body.String())
+	}
+	assertErrorCode(t, rec, 10022)
+
+	node, err := data.GetRpcNodeByID(nodeID)
+	if err != nil {
+		t.Fatalf("reload rpc node: %v", err)
+	}
+	if node.Url != "https://eth-mainnet.example.com" {
+		t.Fatalf("node url changed after rejected update: %q", node.Url)
+	}
+}
+
+func TestAdminPathIDParseErrorUsesParamsErrno(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doGetAdmin(e, "/admin/api/v1/api-keys/not-a-number/stats", token)
+	assertErrorCode(t, rec, 10009)
+}
+
+func assertErrorCode(t *testing.T, rec *httptest.ResponseRecorder, wantCode int) {
+	t.Helper()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected HTTP 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if got := int(resp["status_code"].(float64)); got != wantCode {
+		t.Fatalf("status_code = %d, want %d; response=%v", got, wantCode, resp)
+	}
+	if got, _ := resp["message"].(string); got != constant.Errno[wantCode] {
+		t.Fatalf("message = %q, want %q; response=%v", got, constant.Errno[wantCode], resp)
+	}
 }
 
 // ─── Wallets ─────────────────────────────────────────────────────────────────
@@ -720,6 +842,143 @@ func TestAdminOrders_MarkPaidNotFound(t *testing.T) {
 	}
 }
 
+func TestAdminOrders_MarkPaidSuccessAfterVerification(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	order := &mdb.Orders{
+		TradeId:        "trade-admin-mark-paid-ok",
+		OrderId:        "order-admin-mark-paid-ok",
+		Amount:         10,
+		Currency:       "CNY",
+		ActualAmount:   1.23,
+		ReceiveAddress: "TTestTronAddress001",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusWaitPay,
+		NotifyUrl:      "https://merchant.example/notify",
+		PayProvider:    mdb.PaymentProviderOnChain,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	verified := false
+	restore := service.SetManualOrderPaymentValidatorForTest(func(got *mdb.Orders, blockID string) (string, error) {
+		verified = true
+		if got.TradeId != order.TradeId {
+			t.Fatalf("validator trade_id = %s, want %s", got.TradeId, order.TradeId)
+		}
+		if blockID != "block-admin-ok" {
+			t.Fatalf("validator block id = %s, want block-admin-ok", blockID)
+		}
+		return "canonical-block-admin-ok", nil
+	})
+	defer restore()
+
+	jsonBytes, _ := json.Marshal(map[string]interface{}{
+		"block_transaction_id": "block-admin-ok",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/v1/orders/"+order.TradeId+"/mark-paid", strings.NewReader(string(jsonBytes)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	t.Logf("MarkOrderPaid success: status=%d body=%s", rec.Code, rec.Body.String())
+	assertOK(t, rec)
+	if !verified {
+		t.Fatal("expected chain verifier to be called")
+	}
+
+	paid, err := data.GetOrderInfoByTradeId(order.TradeId)
+	if err != nil {
+		t.Fatalf("reload order: %v", err)
+	}
+	if paid.Status != mdb.StatusPaySuccess {
+		t.Fatalf("status = %d, want %d", paid.Status, mdb.StatusPaySuccess)
+	}
+	if paid.BlockTransactionId != "canonical-block-admin-ok" {
+		t.Fatalf("block_transaction_id = %q", paid.BlockTransactionId)
+	}
+	if paid.CallBackConfirm != mdb.CallBackConfirmNo {
+		t.Fatalf("callback_confirm = %d, want %d", paid.CallBackConfirm, mdb.CallBackConfirmNo)
+	}
+}
+
+func TestAdminOrders_MarkPaidRejectsVerificationFailure(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	order := &mdb.Orders{
+		TradeId:        "trade-admin-mark-paid-bad-proof",
+		OrderId:        "order-admin-mark-paid-bad-proof",
+		Amount:         10,
+		Currency:       "CNY",
+		ActualAmount:   1.23,
+		ReceiveAddress: "TTestTronAddress001",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusWaitPay,
+		NotifyUrl:      "https://merchant.example/notify",
+		PayProvider:    mdb.PaymentProviderOnChain,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	restore := service.SetManualOrderPaymentValidatorForTest(func(*mdb.Orders, string) (string, error) {
+		return "", errors.New("transaction amount mismatch")
+	})
+	defer restore()
+
+	rec := doPostAdmin(e, "/admin/api/v1/orders/"+order.TradeId+"/mark-paid", map[string]interface{}{
+		"block_transaction_id": "block-admin-bad",
+	}, token)
+	t.Logf("MarkOrderPaid verifier failure: status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected failure, got 200: %s", rec.Body.String())
+	}
+	reloaded, err := data.GetOrderInfoByTradeId(order.TradeId)
+	if err != nil {
+		t.Fatalf("reload order: %v", err)
+	}
+	if reloaded.Status != mdb.StatusWaitPay || reloaded.BlockTransactionId != "" {
+		t.Fatalf("order changed after failed verification: status=%d block=%q", reloaded.Status, reloaded.BlockTransactionId)
+	}
+}
+
+func TestAdminOrders_MarkPaidRejectsNonOnChainOrder(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	order := &mdb.Orders{
+		TradeId:        "trade-admin-mark-paid-provider",
+		OrderId:        "order-admin-mark-paid-provider",
+		Amount:         10,
+		Currency:       "CNY",
+		ActualAmount:   1.23,
+		ReceiveAddress: "TTestTronAddress001",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusWaitPay,
+		NotifyUrl:      "https://merchant.example/notify",
+		PayProvider:    mdb.PaymentProviderOkPay,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+	called := false
+	restore := service.SetManualOrderPaymentValidatorForTest(func(*mdb.Orders, string) (string, error) {
+		called = true
+		return "block-admin-provider", nil
+	})
+	defer restore()
+
+	rec := doPostAdmin(e, "/admin/api/v1/orders/"+order.TradeId+"/mark-paid", map[string]interface{}{
+		"block_transaction_id": "block-admin-provider",
+	}, token)
+	t.Logf("MarkOrderPaid provider order: status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected failure, got 200: %s", rec.Body.String())
+	}
+	if called {
+		t.Fatal("verifier should not run for non-on-chain order")
+	}
+}
+
 // TestAdminOrders_ResendCallbackNotFound verifies resend-callback graceful error.
 func TestAdminOrders_ResendCallbackNotFound(t *testing.T) {
 	e, token := setupAdminTestEnv(t)
@@ -727,6 +986,59 @@ func TestAdminOrders_ResendCallbackNotFound(t *testing.T) {
 	t.Logf("ResendCallback (not found): status=%d body=%s", rec.Code, rec.Body.String())
 	if rec.Code >= 500 {
 		t.Fatalf("unexpected server error: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminOrders_ResendCallbackRejectsEmptyNotifyURL(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	order := &mdb.Orders{
+		TradeId:         "trade-admin-resend-empty-url",
+		OrderId:         "order-admin-resend-empty-url",
+		Status:          mdb.StatusPaySuccess,
+		CallBackConfirm: mdb.CallBackConfirmOk,
+		CallbackNum:     3,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	rec := doPostAdmin(e, "/admin/api/v1/orders/"+order.TradeId+"/resend-callback", nil, token)
+	t.Logf("ResendCallback empty notify_url: status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected failure, got 200: %s", rec.Body.String())
+	}
+	reloaded, err := data.GetOrderInfoByTradeId(order.TradeId)
+	if err != nil {
+		t.Fatalf("reload order: %v", err)
+	}
+	if reloaded.CallBackConfirm != mdb.CallBackConfirmOk || reloaded.CallbackNum != 3 {
+		t.Fatalf("callback state changed: confirm=%d num=%d", reloaded.CallBackConfirm, reloaded.CallbackNum)
+	}
+}
+
+func TestAdminOrders_ResendCallbackRequeuesPaidOrder(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	order := &mdb.Orders{
+		TradeId:         "trade-admin-resend-ok",
+		OrderId:         "order-admin-resend-ok",
+		Status:          mdb.StatusPaySuccess,
+		NotifyUrl:       "https://merchant.example/notify",
+		CallBackConfirm: mdb.CallBackConfirmOk,
+		CallbackNum:     3,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	rec := doPostAdmin(e, "/admin/api/v1/orders/"+order.TradeId+"/resend-callback", nil, token)
+	t.Logf("ResendCallback success: status=%d body=%s", rec.Code, rec.Body.String())
+	assertOK(t, rec)
+	reloaded, err := data.GetOrderInfoByTradeId(order.TradeId)
+	if err != nil {
+		t.Fatalf("reload order: %v", err)
+	}
+	if reloaded.CallBackConfirm != mdb.CallBackConfirmNo || reloaded.CallbackNum != 0 {
+		t.Fatalf("callback state = confirm %d num %d, want no/0", reloaded.CallBackConfirm, reloaded.CallbackNum)
 	}
 }
 
@@ -749,25 +1061,312 @@ func TestAdminDashboard_AllRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminDashboard_RangeStatsIncludeHistoricalOrders(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	yesterday := time.Now().AddDate(0, 0, -1)
+	createdAt := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 10, 0, 0, 0, time.Local)
+	updatedAt := createdAt.Add(5 * time.Minute)
+
+	order := &mdb.Orders{
+		TradeId:        "trade-dashboard-yesterday",
+		OrderId:        "order-dashboard-yesterday",
+		Amount:         100,
+		Currency:       "CNY",
+		ActualAmount:   12.5,
+		ReceiveAddress: "TTestDashboardAddress001",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusPaySuccess,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create historical order: %v", err)
+	}
+	if err := dao.Mdb.Model(order).Updates(map[string]interface{}{
+		"created_at": createdAt,
+		"updated_at": updatedAt,
+	}).Error; err != nil {
+		t.Fatalf("age historical order: %v", err)
+	}
+
+	todayResp := assertOK(t, doGetAdmin(e, "/admin/api/v1/dashboard/order-stats", token))
+	todayData, _ := todayResp["data"].(map[string]interface{})
+	if got, _ := todayData["order_count"].(float64); got != 0 {
+		t.Fatalf("default order-stats order_count = %v, want 0 for today's range", got)
+	}
+
+	statsResp := assertOK(t, doGetAdmin(e, "/admin/api/v1/dashboard/order-stats?range=7d", token))
+	statsData, _ := statsResp["data"].(map[string]interface{})
+	if got, _ := statsData["order_count"].(float64); got != 1 {
+		t.Fatalf("7d order-stats order_count = %v, want 1", got)
+	}
+	if got, _ := statsData["success_count"].(float64); got != 1 {
+		t.Fatalf("7d order-stats success_count = %v, want 1", got)
+	}
+
+	overviewResp := assertOK(t, doGetAdmin(e, "/admin/api/v1/dashboard/overview?range=7d", token))
+	overviewData, _ := overviewResp["data"].(map[string]interface{})
+	if got, _ := overviewData["order_count"].(float64); got != 1 {
+		t.Fatalf("7d overview order_count = %v, want 1", got)
+	}
+	if got, _ := overviewData["volume"].(float64); got != 12.5 {
+		t.Fatalf("7d overview volume = %v, want 12.5", got)
+	}
+
+	for _, path := range []string{
+		"/admin/api/v1/dashboard/asset-trend?range=7d",
+		"/admin/api/v1/dashboard/revenue-trend?range=7d",
+		"/admin/api/v1/dashboard/asset-trend?range=30d",
+		"/admin/api/v1/dashboard/revenue-trend?range=30d",
+	} {
+		resp := assertOK(t, doGetAdmin(e, path, token))
+		rows, _ := resp["data"].([]interface{})
+		day := createdAt.Format("2006-01-02")
+		found := false
+		for _, row := range rows {
+			item, _ := row.(map[string]interface{})
+			if item["day"] != day {
+				continue
+			}
+			found = true
+			if got, _ := item["order_count"].(float64); got != 1 {
+				t.Fatalf("%s order_count for %s = %v, want 1", path, day, got)
+			}
+			if got, _ := item["success_count"].(float64); got != 1 {
+				t.Fatalf("%s success_count for %s = %v, want 1", path, day, got)
+			}
+			if got, _ := item["actual_amount"].(float64); got != 12.5 {
+				t.Fatalf("%s actual_amount for %s = %v, want 12.5", path, day, got)
+			}
+		}
+		if !found {
+			t.Fatalf("%s missing historical bucket %s: %#v", path, day, rows)
+		}
+	}
+
+	addressResp := assertOK(t, doGetAdmin(e, "/admin/api/v1/dashboard/asset-trend?range=7d&group_by=address", token))
+	addressRows, _ := addressResp["data"].([]interface{})
+	day := createdAt.Format("2006-01-02")
+	foundAddress := false
+	for _, row := range addressRows {
+		item, _ := row.(map[string]interface{})
+		if item["day"] != day || item["address"] != order.ReceiveAddress {
+			continue
+		}
+		foundAddress = true
+		if got, _ := item["actual_amount"].(float64); got != 12.5 {
+			t.Fatalf("address trend actual_amount for %s = %v, want 12.5", day, got)
+		}
+	}
+	if !foundAddress {
+		t.Fatalf("address trend missing historical bucket %s/%s: %#v", day, order.ReceiveAddress, addressRows)
+	}
+}
+
+func TestAdminDashboard_TodayTrendUsesHourlyBuckets(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	now := time.Now()
+	createdAt := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.Local)
+	updatedAt := createdAt.Add(2 * time.Minute)
+
+	order := &mdb.Orders{
+		TradeId:        "trade-dashboard-today",
+		OrderId:        "order-dashboard-today",
+		Amount:         80,
+		Currency:       "CNY",
+		ActualAmount:   9.75,
+		ReceiveAddress: "TTestDashboardAddressHourly",
+		Token:          "USDT",
+		Network:        mdb.NetworkTron,
+		Status:         mdb.StatusPaySuccess,
+	}
+	if err := dao.Mdb.Create(order).Error; err != nil {
+		t.Fatalf("create today order: %v", err)
+	}
+	if err := dao.Mdb.Model(order).Updates(map[string]interface{}{
+		"created_at": createdAt,
+		"updated_at": updatedAt,
+	}).Error; err != nil {
+		t.Fatalf("set today order time: %v", err)
+	}
+
+	for _, path := range []string{
+		"/admin/api/v1/dashboard/asset-trend?range=today",
+		"/admin/api/v1/dashboard/revenue-trend?range=today",
+	} {
+		resp := assertOK(t, doGetAdmin(e, path, token))
+		rows, _ := resp["data"].([]interface{})
+		hour := createdAt.Format("2006-01-02 15:00")
+		found := false
+		for _, row := range rows {
+			item, _ := row.(map[string]interface{})
+			if item["day"] != hour {
+				continue
+			}
+			found = true
+			if got, _ := item["order_count"].(float64); got != 1 {
+				t.Fatalf("%s order_count for %s = %v, want 1", path, hour, got)
+			}
+			if got, _ := item["success_count"].(float64); got != 1 {
+				t.Fatalf("%s success_count for %s = %v, want 1", path, hour, got)
+			}
+			if got, _ := item["actual_amount"].(float64); got != 9.75 {
+				t.Fatalf("%s actual_amount for %s = %v, want 9.75", path, hour, got)
+			}
+		}
+		if !found {
+			t.Fatalf("%s missing hourly bucket %s: %#v", path, hour, rows)
+		}
+	}
+}
+
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 // TestAdminSettings_ListAndUpsert verifies listing and upserting settings.
 func TestAdminSettings_ListAndUpsert(t *testing.T) {
 	e, token := setupAdminTestEnv(t)
 
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopToken, "token-visible-in-settings", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_token: %v", err)
+	}
+
 	// List settings.
 	rec := doGetAdmin(e, "/admin/api/v1/settings", token)
 	t.Logf("ListSettings: %s", rec.Body.String())
-	assertOK(t, rec)
+	resp := assertOK(t, rec)
+	rows, ok := resp["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected settings array, got %T", resp["data"])
+	}
+	foundToken := false
+	for _, row := range rows {
+		item, _ := row.(map[string]interface{})
+		if item["key"] == mdb.SettingKeyOkPayShopToken {
+			foundToken = true
+			if item["value"] != "token-visible-in-settings" {
+				t.Fatalf("okpay.shop_token value = %v, want token-visible-in-settings", item["value"])
+			}
+		}
+	}
+	if !foundToken {
+		t.Fatalf("expected admin settings list to expose %s", mdb.SettingKeyOkPayShopToken)
+	}
 
 	// Upsert a setting.
 	rec = doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
 		"items": []map[string]interface{}{
-			{"group": "rate", "key": "rate.forced_usdt_rate", "value": "7.5", "type": "string"},
+			{"group": "rate", "key": mdb.SettingKeyRateForcedRateList, "value": map[string]interface{}{
+				"cny": map[string]interface{}{"usdt": 0.14635},
+				"usd": map[string]interface{}{"usdt": 1},
+			}, "type": "json"},
 		},
 	}, token)
 	t.Logf("UpsertSettings: %s", rec.Body.String())
 	assertOK(t, rec)
+}
+
+func TestAdminSettings_ForcedRateListValidation(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateForcedRateList, "value": map[string]interface{}{
+				" CNY ": map[string]interface{}{" USDT ": 0.14635},
+			}, "type": "string"},
+			{"group": "rate", "key": mdb.SettingKeyRateForcedRateList, "value": `{"cny":`, "type": "json"},
+			{"group": "rate", "key": mdb.SettingKeyRateForcedRateList, "value": map[string]interface{}{
+				"CNY": map[string]interface{}{"USDT": 0.14635},
+				"cny": map[string]interface{}{"usdt": 0.14636},
+			}, "type": "json"},
+		},
+	}, token)
+	resp := assertOK(t, rec)
+	results, ok := resp["data"].([]interface{})
+	if !ok || len(results) != 3 {
+		t.Fatalf("expected three results, got %T %v", resp["data"], resp["data"])
+	}
+	first, _ := results[0].(map[string]interface{})
+	if first["ok"] != true {
+		t.Fatalf("valid forced rate list result = %v", first)
+	}
+	second, _ := results[1].(map[string]interface{})
+	if second["ok"] != false {
+		t.Fatalf("invalid forced rate list result = %v, want ok=false", second)
+	}
+	third, _ := results[2].(map[string]interface{})
+	if third["ok"] != false {
+		t.Fatalf("duplicate forced rate list result = %v, want ok=false", third)
+	}
+
+	if got := data.GetSettingString(mdb.SettingKeyRateForcedRateList, ""); got != `{"cny":{"usdt":0.14635}}` {
+		t.Fatalf("forced rate list value = %q", got)
+	}
+	if rate := config.GetRateForCoin("USDT", "CNY"); rate != 0.14635 {
+		t.Fatalf("GetRateForCoin(USDT, CNY) = %v, want 0.14635", rate)
+	}
+	var row mdb.Setting
+	if err := dao.Mdb.Where("`key` = ?", mdb.SettingKeyRateForcedRateList).Take(&row).Error; err != nil {
+		t.Fatalf("load forced rate list: %v", err)
+	}
+	if row.Type != mdb.SettingTypeJSON {
+		t.Fatalf("forced rate list type = %q, want %q", row.Type, mdb.SettingTypeJSON)
+	}
+}
+
+func TestAdminSettings_AmountPrecisionValidationAndListing(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "system", "key": mdb.SettingKeyAmountPrecision, "value": "4", "type": "int"},
+		},
+	}, token)
+	resp := assertOK(t, rec)
+	results, ok := resp["data"].([]interface{})
+	if !ok || len(results) != 1 {
+		t.Fatalf("expected one result, got %T %v", resp["data"], resp["data"])
+	}
+	result, _ := results[0].(map[string]interface{})
+	if result["ok"] != true {
+		t.Fatalf("amount precision upsert result = %v", result)
+	}
+
+	rec = doGetAdmin(e, "/admin/api/v1/settings?group=system", token)
+	resp = assertOK(t, rec)
+	rows, ok := resp["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected settings array, got %T", resp["data"])
+	}
+	found := false
+	for _, row := range rows {
+		item, _ := row.(map[string]interface{})
+		if item["key"] == mdb.SettingKeyAmountPrecision {
+			found = true
+			if item["value"] != "4" {
+				t.Fatalf("amount precision value = %v, want 4", item["value"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected settings list to include %s", mdb.SettingKeyAmountPrecision)
+	}
+
+	rec = doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "system", "key": mdb.SettingKeyAmountPrecision, "value": "7", "type": "int"},
+			{"group": "system", "key": mdb.SettingKeyAmountPrecision, "value": "abc", "type": "int"},
+		},
+	}, token)
+	resp = assertOK(t, rec)
+	results, ok = resp["data"].([]interface{})
+	if !ok || len(results) != 2 {
+		t.Fatalf("expected two results, got %T %v", resp["data"], resp["data"])
+	}
+	for _, item := range results {
+		result, _ := item.(map[string]interface{})
+		if result["ok"] != false {
+			t.Fatalf("invalid amount precision result = %v, want ok=false", result)
+		}
+	}
 }
 
 // TestAdminSettings_DeleteNonExistent verifies deleting a non-existent setting.
@@ -779,6 +1378,248 @@ func TestAdminSettings_DeleteNonExistent(t *testing.T) {
 	if rec.Code >= 500 {
 		t.Fatalf("unexpected server error: %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestAdminSettings_RejectsPrivateRateAPIURL(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateApiUrl, "value": "http://127.0.0.1:8080/", "type": "string"},
+		},
+	}, token)
+	resp := assertOK(t, rec)
+	results, ok := resp["data"].([]interface{})
+	if !ok || len(results) != 1 {
+		t.Fatalf("expected one result, got %T %v", resp["data"], resp["data"])
+	}
+	result, _ := results[0].(map[string]interface{})
+	if result["ok"] != false {
+		t.Fatalf("private rate.api_url result = %v, want ok=false", result)
+	}
+	if got := int(result["error_code"].(float64)); got != 10043 {
+		t.Fatalf("private rate.api_url error_code = %d, want 10043; result=%v", got, result)
+	}
+	if got, _ := result["error"].(string); got != constant.Errno[10043] {
+		t.Fatalf("private rate.api_url error = %q, want %q", got, constant.Errno[10043])
+	}
+}
+
+func TestAdminSettings_AllowsPublicRateAPIURL(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateApiUrl, "value": "https://93.184.216.34/rate", "type": "string"},
+		},
+	}, token)
+	resp := assertOK(t, rec)
+	results, ok := resp["data"].([]interface{})
+	if !ok || len(results) != 1 {
+		t.Fatalf("expected one result, got %T %v", resp["data"], resp["data"])
+	}
+	result, _ := results[0].(map[string]interface{})
+	if result["ok"] != true {
+		t.Fatalf("public rate.api_url result = %v, want ok=true", result)
+	}
+}
+
+func TestAdminSettings_DeleteThenReupsertRestoresSetting(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateApiUrl, "value": "https://93.184.216.34/rate-old", "type": "string"},
+		},
+	}, token)
+	assertOK(t, rec)
+
+	rec = doDeleteAdmin(e, "/admin/api/v1/settings/"+mdb.SettingKeyRateApiUrl, token)
+	assertOK(t, rec)
+	if got := data.GetSettingString(mdb.SettingKeyRateApiUrl, "fallback"); got != "fallback" {
+		t.Fatalf("deleted setting still in cache/read path: got %q", got)
+	}
+
+	rec = doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateApiUrl, "value": "https://93.184.216.34/rate-new", "type": "string"},
+		},
+	}, token)
+	assertOK(t, rec)
+
+	rec = doGetAdmin(e, "/admin/api/v1/settings?group=rate", token)
+	resp := assertOK(t, rec)
+	rows, ok := resp["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected settings array, got %T", resp["data"])
+	}
+	found := false
+	for _, row := range rows {
+		item, _ := row.(map[string]interface{})
+		if item["key"] == mdb.SettingKeyRateApiUrl {
+			found = true
+			if item["value"] != "https://93.184.216.34/rate-new" {
+				t.Fatalf("rate.api_url value = %v, want new value", item["value"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected settings list to include restored %s", mdb.SettingKeyRateApiUrl)
+	}
+
+	var restored mdb.Setting
+	if err := dao.Mdb.Unscoped().Where("`key` = ?", mdb.SettingKeyRateApiUrl).Take(&restored).Error; err != nil {
+		t.Fatalf("load restored setting unscoped: %v", err)
+	}
+	if restored.DeletedAt.Valid {
+		t.Fatalf("restored setting still has deleted_at=%v", restored.DeletedAt)
+	}
+}
+
+func TestAdminSettings_DeleteThenReupsertRestoresForcedRateList(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateForcedRateList, "value": map[string]interface{}{
+				"CNY": map[string]interface{}{"USDT": 0.14635},
+			}, "type": "json"},
+		},
+	}, token)
+	assertOK(t, rec)
+
+	rec = doDeleteAdmin(e, "/admin/api/v1/settings/"+mdb.SettingKeyRateForcedRateList, token)
+	assertOK(t, rec)
+	if got := data.GetSettingString(mdb.SettingKeyRateForcedRateList, "fallback"); got != "fallback" {
+		t.Fatalf("deleted forced rate list still in cache/read path: got %q", got)
+	}
+	if got := config.GetRateForCoin("USDT", "CNY"); got != 0 {
+		t.Fatalf("deleted forced rate list still used by rate lookup: got %v", got)
+	}
+
+	rec = doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"group": "rate", "key": mdb.SettingKeyRateForcedRateList, "value": map[string]interface{}{
+				"CNY": map[string]interface{}{"USDT": 0.15},
+			}, "type": "json"},
+		},
+	}, token)
+	assertOK(t, rec)
+
+	if got := data.GetSettingString(mdb.SettingKeyRateForcedRateList, ""); got != `{"cny":{"usdt":0.15}}` {
+		t.Fatalf("restored forced rate list = %q", got)
+	}
+	if got := config.GetRateForCoin("USDT", "CNY"); got != 0.15 {
+		t.Fatalf("restored forced rate list lookup = %v, want 0.15", got)
+	}
+
+	var restored mdb.Setting
+	if err := dao.Mdb.Unscoped().Where("`key` = ?", mdb.SettingKeyRateForcedRateList).Take(&restored).Error; err != nil {
+		t.Fatalf("load restored forced rate list unscoped: %v", err)
+	}
+	if restored.DeletedAt.Valid {
+		t.Fatalf("restored forced rate list still has deleted_at=%v", restored.DeletedAt)
+	}
+}
+
+func TestAdminConfig_ExposesOkPayCredentials(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+	if err := data.SetSetting(mdb.SettingGroupBrand, mdb.SettingKeyBrandCheckoutName, "admin cashier", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed brand.checkout_name: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayEnabled, "true", mdb.SettingTypeBool); err != nil {
+		t.Fatalf("seed okpay.enabled: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopID, "shop-admin-1", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_id: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayShopToken, "token-admin-1", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.shop_token: %v", err)
+	}
+	if err := data.SetSetting(mdb.SettingGroupOkPay, mdb.SettingKeyOkPayCallbackURL, "https://example.com/notify", mdb.SettingTypeString); err != nil {
+		t.Fatalf("seed okpay.callback_url: %v", err)
+	}
+
+	rec := doGetAdmin(e, "/admin/api/v1/config", token)
+	resp := assertOK(t, rec)
+	dataObj, _ := resp["data"].(map[string]interface{})
+	site, ok := dataObj["site"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected site object, got %T", dataObj["site"])
+	}
+	if site["cashier_name"] != "admin cashier" {
+		t.Fatalf("cashier_name = %v, want admin cashier", site["cashier_name"])
+	}
+	okpay, ok := dataObj["okpay"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected okpay object, got %T", dataObj["okpay"])
+	}
+	if okpay["shop_id"] != "shop-admin-1" {
+		t.Fatalf("shop_id = %v, want shop-admin-1", okpay["shop_id"])
+	}
+	if okpay["shop_token"] != "token-admin-1" {
+		t.Fatalf("shop_token = %v, want token-admin-1", okpay["shop_token"])
+	}
+	if okpay["callback_url"] != "https://example.com/notify" {
+		t.Fatalf("callback_url = %v", okpay["callback_url"])
+	}
+}
+
+func TestAdminSettings_UpsertBrandReflectsInConfig(t *testing.T) {
+	e, token := setupAdminTestEnv(t)
+
+	updateBrand := func(cashier, logo, title, support, bgColor, bgImage string) {
+		rec := doPutAdmin(e, "/admin/api/v1/settings", map[string]interface{}{
+			"items": []map[string]interface{}{
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandCheckoutName, "value": cashier, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandLogoUrl, "value": logo, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandSiteTitle, "value": title, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandSupportUrl, "value": support, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandBackgroundColor, "value": bgColor, "type": mdb.SettingTypeString},
+				{"group": mdb.SettingGroupBrand, "key": mdb.SettingKeyBrandBackgroundImageUrl, "value": bgImage, "type": mdb.SettingTypeString},
+			},
+		}, token)
+		assertOK(t, rec)
+	}
+
+	assertSite := func(path, wantCashier, wantLogo, wantTitle, wantSupport, wantBgColor, wantBgImage string) {
+		rec := doGet(e, path)
+		if strings.HasPrefix(path, "/admin/") {
+			rec = doGetAdmin(e, path, token)
+		}
+		resp := assertOK(t, rec)
+		dataObj, _ := resp["data"].(map[string]interface{})
+		site, ok := dataObj["site"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s expected site object, got %T", path, dataObj["site"])
+		}
+		if site["cashier_name"] != wantCashier {
+			t.Fatalf("%s cashier_name=%v, want %s", path, site["cashier_name"], wantCashier)
+		}
+		if site["logo_url"] != wantLogo {
+			t.Fatalf("%s logo_url=%v, want %s", path, site["logo_url"], wantLogo)
+		}
+		if site["website_title"] != wantTitle {
+			t.Fatalf("%s website_title=%v, want %s", path, site["website_title"], wantTitle)
+		}
+		if site["support_link"] != wantSupport {
+			t.Fatalf("%s support_link=%v, want %s", path, site["support_link"], wantSupport)
+		}
+		if site["background_color"] != wantBgColor {
+			t.Fatalf("%s background_color=%v, want %s", path, site["background_color"], wantBgColor)
+		}
+		if site["background_image_url"] != wantBgImage {
+			t.Fatalf("%s background_image_url=%v, want %s", path, site["background_image_url"], wantBgImage)
+		}
+	}
+
+	updateBrand("cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1", "#111111", "https://cdn.example.com/bg-v1.png")
+	assertSite("/payments/gmpay/v1/config", "cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1", "#111111", "https://cdn.example.com/bg-v1.png")
+	assertSite("/admin/api/v1/config", "cashier-v1", "https://cdn.example.com/v1.png", "title-v1", "https://example.com/help-v1", "#111111", "https://cdn.example.com/bg-v1.png")
+
+	updateBrand("cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2", "#222222", "https://cdn.example.com/bg-v2.png")
+	assertSite("/payments/gmpay/v1/config", "cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2", "#222222", "https://cdn.example.com/bg-v2.png")
+	assertSite("/admin/api/v1/config", "cashier-v2", "https://cdn.example.com/v2.png", "title-v2", "https://example.com/help-v2", "#222222", "https://cdn.example.com/bg-v2.png")
 }
 
 // ─── Notification Channels ───────────────────────────────────────────────────
@@ -898,7 +1739,7 @@ func TestAdminOrders_ListWithSubExcludesSubOrdersFromTopLevel(t *testing.T) {
 		"currency":     "CNY",
 		"token":        "USDT",
 		"network":      "tron",
-		"notify_url":   "https://merchant.example/callback",
+		"notify_url":   "https://93.184.216.34/callback",
 		"redirect_url": "https://merchant.example/redirect",
 	})
 	rec := doPost(e, "/payments/gmpay/v1/order/create-transaction", parentBody)

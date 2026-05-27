@@ -90,13 +90,15 @@ func loadChainTokenContracts(network, logPrefix string) []common.Address {
 }
 
 // resolveChainWsNode picks a healthy WS endpoint from rpc_nodes for the
-// given network. If no enabled node is configured, the caller skips the
-// current listener run so admin-side disabled/deleted rows are respected.
-func resolveChainWsNode(network, logPrefix string) (*mdb.RpcNode, bool) {
-	node, err := data.SelectRpcNode(network, mdb.RpcNodeTypeWs)
+// given network, skipping nodes that are cooling down after failures.
+// If no enabled node is configured, the caller skips the current
+// listener run so admin-side disabled/deleted rows are respected.
+func resolveChainWsNode(network, logPrefix string, excludeIDs ...uint64) (*mdb.RpcNode, bool) {
+	node, err := data.SelectGeneralRpcNode(network, mdb.RpcNodeTypeWs, excludeIDs...)
 	if err == nil && node != nil && node.ID > 0 {
 		rpcURL := strings.TrimSpace(node.Url)
 		if rpcURL != "" {
+			node.Url = rpcURL
 			return node, true
 		}
 		log.Sugar.Errorf("%s rpc_nodes id=%d has empty url", logPrefix, node.ID)

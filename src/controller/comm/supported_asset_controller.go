@@ -5,49 +5,25 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Banezzz/ezpay/config"
+	"github.com/Banezzz/ezpay/middleware"
 	"github.com/Banezzz/ezpay/model/data"
+	"github.com/Banezzz/ezpay/model/mdb"
 	"github.com/Banezzz/ezpay/model/response"
 	"github.com/Banezzz/ezpay/util/constant"
 	"github.com/labstack/echo/v4"
 )
 
-// GetSupportedAssets 对外公开可用链与 token 列表。数据源是管理后台
-// 的 chains + chain_tokens + wallet_address 三张表的实时查询，admin
-// 启用/禁用链或代币后，这个接口在下次调用时就会反映新状态（无缓存）。
-// 仅返回：链 enabled=true、代币 enabled=true、且该链上至少有一个可用
-// 钱包地址的组合。
-// @Summary      List supported (network, tokens) groupings
-// @Description  Public endpoint, Auth required in /admin/api/v1/supported-assets
-// @Tags         Supported Assets
-// @Produce      json
-// @Success      200 {object} response.ApiResponse{data=response.SupportedAssetsResponse}
-// @Failure      400 {object} response.ApiResponse
-// @Router       /payments/ezpay/v1/supported-assets [get]
-// @Router       /payments/gmpay/v1/supported-assets [get]
-// @Router       /admin/api/v1/supported-assets [get]
-func (c *BaseCommController) GetSupportedAssets(ctx echo.Context) error {
-	return c.getSupportedAssets(ctx)
-}
-
-// GetCheckoutSupportedAssets returns assets that the public checkout can
-// create payment orders for today.
-func (c *BaseCommController) GetCheckoutSupportedAssets(ctx echo.Context) error {
-	return c.getSupportedAssets(ctx)
-}
-
-func (c *BaseCommController) getSupportedAssets(ctx echo.Context) error {
+func buildSupportedAssets() ([]response.NetworkTokenSupport, error) {
 	chains, err := data.ListEnabledChains()
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return nil, err
 	}
 	wallets, err := data.GetAvailableWalletAddress()
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return nil, err
 	}
 
-	// A chain only qualifies if it has at least one wallet available —
-	// without a recipient address, payments on that chain can't be
-	// processed even if the chain + token config says "enabled".
 	networkHasWallet := make(map[string]struct{})
 	for _, w := range wallets {
 		networkHasWallet[strings.ToLower(w.Network)] = struct{}{}
@@ -61,7 +37,7 @@ func (c *BaseCommController) getSupportedAssets(ctx echo.Context) error {
 		}
 		tokens, err := data.ListEnabledChainTokensByNetwork(network)
 		if err != nil {
-			return c.FailJson(ctx, err)
+			return nil, err
 		}
 		if len(tokens) == 0 {
 			continue
@@ -78,25 +54,105 @@ func (c *BaseCommController) getSupportedAssets(ctx echo.Context) error {
 			continue
 		}
 		sort.Strings(symbols)
+		displayName := strings.TrimSpace(ch.DisplayName)
+		if displayName == "" {
+			displayName = network
+		}
 		supports = append(supports, response.NetworkTokenSupport{
-			Network: network,
-			Tokens:  symbols,
+			Network:     network,
+			DisplayName: displayName,
+			Tokens:      symbols,
 		})
 	}
 
-	return c.SucJson(ctx, response.SupportedAssetsResponse{Supports: supports})
+	return supports, nil
 }
 
-// ListSupportedAssetRecords 查询支持项明细（无需鉴权）。
-// @Summary      List supported asset records
-// @Description  Public endpoint. Returns enabled chain_tokens, optionally filtered by network.
+// GetSupportedAssets 对外公开可用链与 token 列表。数据源是管理后台
+// 的 chains + chain_tokens + wallet_address 三张表的实时查询，admin
+// 启用/禁用链或代币后，这个接口在下次调用时就会反映新状态（无缓存）。
+// 仅返回：链 enabled=true、代币 enabled=true、且该链上至少有一个可用
+// 钱包地址的组合。
+// @Summary      List supported (network, tokens) groupings
+// @Description  Public endpoint, Auth required in /admin/api/v1/supported-assets
 // @Tags         Supported Assets
 // @Produce      json
-// @Param        network query string false "Network filter (e.g. tron, ethereum)"
-// @Success      200 {object} response.ApiResponse{data=[]mdb.ChainToken}
+// @Success      200 {object} response.ApiResponse{data=response.SupportedAssetsResponse}
 // @Failure      400 {object} response.ApiResponse
-// @Router       /payments/ezpay/v1/supported-assets/records [get]
-// @Router       /payments/gmpay/v1/supported-assets/records [get]
+// @Router       /payments/ezpay/v1/supported-assets [get]
+// @Router       /payments/gmpay/v1/supported-assets [get]
+// @Router       /admin/api/v1/supported-assets [get]
+func (c *BaseCommController) GetSupportedAssets(ctx echo.Context) error {
+	supports, err := buildSupportedAssets()
+	if err != nil {
+		return c.FailJson(ctx, err)
+	}
+	return c.SucJson(ctx, supports)
+}
+
+// GetCheckoutSupportedAssets returns assets that the public checkout can
+// create payment orders for today.
+func (c *BaseCommController) GetCheckoutSupportedAssets(ctx echo.Context) error {
+	supports, err := buildSupportedAssets()
+	if err != nil {
+		return c.FailJson(ctx, err)
+	}
+	return c.SucJson(ctx, supports)
+}
+
+// GetPublicConfig returns payment/site config consumed by cashier/frontends.
+// The public route returns brand/site display config plus non-sensitive
+// epay/okpay knobs, while the authenticated admin route also includes OkPay
+// credentials and internal URLs.
+// @Summary      Get public payment config
+// @Description  Returns supported_assets plus site, epay and okpay config used by cashier/frontends.
+// @Description  The authenticated admin variant (/admin/api/v1/config) also includes OkPay shop credentials and internal callback settings.
+// @Tags         Payment Config
+// @Produce      json
+// @Success      200 {object} response.ApiResponse{data=response.PublicConfigResponse}
+// @Failure      400 {object} response.ApiResponse
+// @Router       /payments/ezpay/v1/config [get]
+// @Router       /payments/gmpay/v1/config [get]
+// @Router       /admin/api/v1/config [get]
+func (c *BaseCommController) GetPublicConfig(ctx echo.Context) error {
+	supports, err := buildSupportedAssets()
+	if err != nil {
+		return c.FailJson(ctx, err)
+	}
+	okpay := response.OkPayPublicConfig{
+		Enabled:     data.GetOkPayEnabled(),
+		AllowTokens: data.GetOkPayAllowTokens(),
+	}
+	if ctx.Get(middleware.AdminUserIDKey) != nil {
+		okpay.ShopID = data.GetOkPayShopID()
+		okpay.ShopToken = data.GetOkPayShopToken()
+		okpay.APIURL = data.GetOkPayAPIURL()
+		okpay.CallbackURL = data.GetOkPayCallbackURL()
+		okpay.ReturnURL = data.GetOkPayReturnURL()
+		okpay.TimeoutSeconds = data.GetOkPayTimeoutSeconds()
+	}
+	return c.SucJson(ctx, response.PublicConfigResponse{
+		SupportedAssets: supports,
+		Site: response.SitePublicConfig{
+			CashierName:        data.GetBrandCashierName(),
+			LogoURL:            data.GetBrandLogoURL(),
+			WebsiteTitle:       data.GetBrandWebsiteTitle(),
+			SupportLink:        data.GetBrandSupportURL(),
+			BackgroundColor:    data.GetBrandBackgroundColor(),
+			BackgroundImageURL: data.GetBrandBackgroundImageURL(),
+		},
+		Epay: response.EpayPublicConfig{
+			DefaultToken:    data.GetSettingString(mdb.SettingKeyEpayDefaultToken, "usdt"),
+			DefaultCurrency: data.GetSettingString(mdb.SettingKeyEpayDefaultCurrency, "cny"),
+			DefaultNetwork:  data.GetSettingString(mdb.SettingKeyEpayDefaultNetwork, "tron"),
+		},
+		OkPay:   okpay,
+		Version: config.GetAppVersion(),
+	})
+}
+
+// ListSupportedAssetRecords is currently not wired to a public route.
+// Kept as an internal helper candidate for future admin/debug use.
 func (c *BaseCommController) ListSupportedAssetRecords(ctx echo.Context) error {
 	network := ctx.QueryParam("network")
 	list, err := data.ListEnabledChainTokens(network)

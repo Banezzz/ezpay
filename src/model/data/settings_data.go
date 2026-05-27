@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Banezzz/ezpay/config"
 	"github.com/Banezzz/ezpay/model/dao"
 	"github.com/Banezzz/ezpay/model/mdb"
 	"gorm.io/gorm/clause"
@@ -118,15 +119,36 @@ func GetSettingBool(key string, fallback bool) bool {
 	return b
 }
 
+const (
+	DefaultAmountPrecision = 2
+	MinAmountPrecision     = 2
+	MaxAmountPrecision     = 6
+)
+
+// NormalizeAmountPrecision clamps external precision values to the supported
+// range used by order creation and transaction matching.
+func NormalizeAmountPrecision(precision int) int {
+	if precision < MinAmountPrecision || precision > MaxAmountPrecision {
+		return DefaultAmountPrecision
+	}
+	return precision
+}
+
+func GetAmountPrecision() int {
+	return NormalizeAmountPrecision(GetSettingInt(mdb.SettingKeyAmountPrecision, DefaultAmountPrecision))
+}
+
 // SetSetting upserts a setting row and refreshes the cache entry.
 func SetSetting(group, key, value, valueType string) error {
 	if valueType == "" {
 		valueType = mdb.SettingTypeString
 	}
 	row := mdb.Setting{Group: group, Key: key, Value: value, Type: valueType}
+	updates := clause.AssignmentColumns([]string{"group", "value", "type", "updated_at"})
+	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "deleted_at"}, Value: nil})
 	err := dao.Mdb.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"group", "value", "type", "updated_at"}),
+		DoUpdates: updates,
 	}).Create(&row).Error
 	if err != nil {
 		return err
@@ -155,6 +177,97 @@ var sensitiveSettingKeys = []string{
 	mdb.SettingKeyInitAdminPasswordHash,
 	mdb.SettingKeyInitAdminPasswordFetched,
 	mdb.SettingKeyInitAdminPasswordChanged,
+}
+
+func getFirstNonEmptySetting(fallback string, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(GetSettingString(key, ""))
+		if value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func GetBrandCashierName() string {
+	return getFirstNonEmptySetting("", mdb.SettingKeyBrandCheckoutName, mdb.SettingKeyBrandSiteName)
+}
+
+func GetBrandLogoURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandLogoUrl, ""))
+}
+
+func GetBrandWebsiteTitle() string {
+	return getFirstNonEmptySetting("", mdb.SettingKeyBrandSiteTitle, mdb.SettingKeyBrandPageTitle)
+}
+
+func GetBrandSupportURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandSupportUrl, ""))
+}
+
+func GetBrandBackgroundColor() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandBackgroundColor, ""))
+}
+
+func GetBrandBackgroundImageURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyBrandBackgroundImageUrl, ""))
+}
+
+// OkPay settings helpers keep the provider-specific defaults in one place so
+// business logic does not need to repeat raw settings keys.
+func GetOkPayEnabled() bool {
+	return GetSettingBool(mdb.SettingKeyOkPayEnabled, false)
+}
+
+func GetOkPayShopID() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayShopID, ""))
+}
+
+func GetOkPayShopToken() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayShopToken, ""))
+}
+
+func GetOkPayAPIURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayAPIURL, "https://api.okaypay.me/shop/"))
+}
+
+func GetOkPayCallbackURL() string {
+	if configured := strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayCallbackURL, "")); configured != "" {
+		return configured
+	}
+	appURI := strings.TrimSpace(config.GetAppUri())
+	if appURI == "" {
+		return ""
+	}
+	return strings.TrimRight(appURI, "/") + "/payments/okpay/v1/notify"
+}
+
+func GetOkPayReturnURL() string {
+	return strings.TrimSpace(GetSettingString(mdb.SettingKeyOkPayReturnURL, ""))
+}
+
+func GetOkPayTimeoutSeconds() int {
+	return GetSettingInt(mdb.SettingKeyOkPayTimeoutSeconds, 10)
+}
+
+func GetOkPayAllowTokens() []string {
+	raw := GetSettingString(mdb.SettingKeyOkPayAllowTokens, "USDT,TRX")
+	if strings.TrimSpace(raw) == "" {
+		return []string{"USDT", "TRX"}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		token := strings.ToUpper(strings.TrimSpace(part))
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	if len(out) == 0 {
+		return []string{"USDT", "TRX"}
+	}
+	return out
 }
 
 // ListSettingsByGroup returns all rows for a given group (empty group = all),

@@ -46,6 +46,7 @@ func RegisterPublicRoutes(e *echo.Echo) {
 
 	payRoute.GET("/checkout-counter-resp/:trade_id", comm.Ctrl.CheckoutCounter)
 	payRoute.GET("/check-status/:trade_id", comm.Ctrl.CheckStatus)
+	payRoute.POST("/submit-tx-hash/:trade_id", comm.Ctrl.SubmitTxHash)
 	payRoute.POST("/switch-network", comm.Ctrl.SwitchNetwork)
 
 	paymentRoute := e.Group("/payments")
@@ -72,8 +73,11 @@ func RegisterInternalRoutes(e *echo.Echo) {
 	// GMPay v1 routes (deprecated, kept for backward compatibility)
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
 	gmpayV1.POST("/order/create-transaction", comm.Ctrl.CreateTransaction, middleware.CheckApiSign())
-	// gmpayV1.GET("/supported-assets/records", comm.Ctrl.ListSupportedAssetRecords)
-	// gmpayV1.GET("/supported-assets/:id", comm.Ctrl.GetSupportedAsset)
+	gmpayV1.GET("/config", comm.Ctrl.GetPublicConfig)
+
+	// okpay v1 routes
+	okpayV1 := paymentRoute.Group("/okpay/v1")
+	okpayV1.POST("/notify", comm.Ctrl.OkPayNotify)
 
 	// EPay v1 routes (易支付 compatible protocol, kept for protocol compatibility)
 	//
@@ -98,7 +102,7 @@ func RegisterInternalRoutes(e *echo.Echo) {
 
 		formParams, err := ctx.FormParams()
 		if err != nil && ctx.Request().Method == http.MethodPost {
-			return comm.Ctrl.FailJson(ctx, fmt.Errorf("invalid epay form params: %w", err))
+			return comm.Ctrl.FailJson(ctx, constant.ParamsMarshalErr)
 		}
 		if err == nil {
 			copyParams(formParams)
@@ -155,7 +159,7 @@ func RegisterInternalRoutes(e *echo.Echo) {
 
 		amountFloat, err := strconv.ParseFloat(money, 64)
 		if err != nil {
-			return comm.Ctrl.FailJson(ctx, fmt.Errorf("invalid money value: %s", money))
+			return comm.Ctrl.FailJson(ctx, constant.PayAmountErr)
 		}
 
 		body := map[string]interface{}{
@@ -177,7 +181,7 @@ func RegisterInternalRoutes(e *echo.Echo) {
 
 		jsonBytes, err := json.Marshal(body)
 		if err != nil {
-			return comm.Ctrl.FailJson(ctx, err)
+			return comm.Ctrl.FailJson(ctx, constant.SystemErr)
 		}
 
 		ctx.Request().Body = io.NopCloser(bytes.NewBuffer(jsonBytes))
@@ -253,8 +257,7 @@ func registerAdminRoutes(e *echo.Echo) {
 	authed.POST("/notification-channels/:id/status", admin.Ctrl.ChangeNotificationChannelStatus)
 	authed.DELETE("/notification-channels/:id", admin.Ctrl.DeleteNotificationChannel)
 
-	//	gmpayV1.GET("/supported-assets", comm.Ctrl.GetSupportedAssets)
-	authed.GET("/supported-assets", comm.Ctrl.GetSupportedAssets) // wrap for admin console, same handler as public endpoint
+	authed.GET("/config", comm.Ctrl.GetPublicConfig) // wrap for admin console, same payload as public endpoint
 
 	// Chains
 	authed.GET("/chains", admin.Ctrl.ListChains)

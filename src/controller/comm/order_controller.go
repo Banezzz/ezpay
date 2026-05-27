@@ -41,9 +41,8 @@ func apiKeyFromContext(ctx echo.Context) *mdb.ApiKey {
 // @Param        name formData string false "Order name"
 // @Param        payment_type formData string false "Payment type"
 // @Success      200 {object} response.ApiResponse{data=response.CreateTransactionResponse}
-// @Failure      400 {object} response.ApiResponse
+// @Failure      400 {object} response.ApiResponse "Stable errno in status_code: 10009 invalid params, 10041 invalid notify_url, 10004 invalid amount, 10014 chain disabled, 10003 no wallet, 10005 no amount channel"
 // @Router       /payments/ezpay/v1/order/create-transaction [post]
-// @Router       /payments/gmpay/v1/order/create-transaction [post]
 func (c *BaseCommController) CreateTransaction(ctx echo.Context) (err error) {
 	req := new(request.CreateTransactionRequest)
 	if err = ctx.Bind(req); err != nil {
@@ -61,13 +60,15 @@ func (c *BaseCommController) CreateTransaction(ctx echo.Context) (err error) {
 
 // SwitchNetwork 切换支付网络，创建或返回子订单
 // @Summary      Switch payment network
-// @Description  Switch to a different payment network, creating or returning a sub-order
+// @Description  Switch to a different payment target, creating or returning a sub-order.
+// @Description  Normal values such as tron/solana/ethereum create on-chain child orders.
+// @Description  The special value okpay creates or reuses an OkPay-hosted child order and returns its payment_url.
 // @Tags         Payment
 // @Accept       json
 // @Produce      json
 // @Param        request body request.SwitchNetworkRequest true "Switch network payload"
-// @Success      200 {object} response.ApiResponse
-// @Failure      400 {object} response.ApiResponse
+// @Success      200 {object} response.ApiResponse{data=response.CheckoutCounterResponse}
+// @Failure      400 {object} response.ApiResponse "Stable errno in status_code: 10008 order not found, 10012 cannot switch sub-order, 10013 not waiting payment, 10017/10018/10019 provider errors, 10042 provider order creation failed"
 // @Router       /pay/switch-network [post]
 func (c *BaseCommController) SwitchNetwork(ctx echo.Context) (err error) {
 	req := new(request.SwitchNetworkRequest)
@@ -84,7 +85,7 @@ func (c *BaseCommController) SwitchNetwork(ctx echo.Context) (err error) {
 
 	jsonBytes, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {
-		return c.FailJson(ctx, err)
+		return c.FailJson(ctx, constant.SystemErr)
 	}
 
 	log.Sugar.Debugf("switch network response: \n%s", string(jsonBytes))
@@ -120,7 +121,7 @@ func (c *BaseCommController) SwitchNetwork(ctx echo.Context) (err error) {
 // @Param        sign formData string true "MD5 signature"
 // @Param        sign_type formData string false "Signature type (MD5)"
 // @Success      302 "Redirect to checkout counter"
-// @Failure      400 {object} response.ApiResponse
+// @Failure      400 {object} response.ApiResponse "Stable errno in status_code: 10009 invalid params, 10041 invalid notify_url, 10004 invalid amount, 10014 chain disabled, 10003 no wallet, 10005 no amount channel"
 // @Router       /payments/epay/v1/order/create-transaction/submit.php [post]
 // @Router       /payments/epay/v1/order/create-transaction/submit.php [get]
 func (c *BaseCommController) CreateTransactionAndRedirect(ctx echo.Context) (err error) {

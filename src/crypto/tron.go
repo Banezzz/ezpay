@@ -1,7 +1,9 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"fmt"
 
 	"github.com/shengdoushi/base58"
 )
@@ -27,4 +29,25 @@ func EncodeCheck(input []byte) string {
 	inputCheck := append(append([]byte(nil), input...), h1[:4]...)
 
 	return Encode(inputCheck)
+}
+
+// DecodeCheck decodes a Base58Check string and validates its 4-byte checksum.
+func DecodeCheck(input string) ([]byte, error) {
+	raw, err := base58.Decode(input, base58.BitcoinAlphabet)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) < 4 {
+		return nil, fmt.Errorf("base58check payload too short")
+	}
+
+	payload := raw[:len(raw)-4]
+	checksum := raw[len(raw)-4:]
+
+	h0 := sha256.Sum256(payload)
+	h1 := sha256.Sum256(h0[:])
+	if !bytes.Equal(checksum, h1[:4]) {
+		return nil, fmt.Errorf("base58check checksum mismatch")
+	}
+	return payload, nil
 }

@@ -18,65 +18,92 @@ import (
 )
 
 func resolveTronNode() (string, string, error) {
-	node, err := data.SelectRpcNode(mdb.NetworkTron, mdb.RpcNodeTypeHttp)
+	node, err := ResolveTronRpcNode()
 	if err != nil {
 		return "", "", err
 	}
+	rpcURL := strings.TrimRight(strings.TrimSpace(node.Url), "/")
+	return rpcURL, node.ApiKey, nil
+}
+
+func ResolveTronRpcNode(excludeIDs ...uint64) (*mdb.RpcNode, error) {
+	node, err := data.SelectGeneralRpcNode(mdb.NetworkTron, mdb.RpcNodeTypeHttp, excludeIDs...)
+	if err != nil {
+		return nil, err
+	}
 	if node == nil || node.ID == 0 {
-		return "", "", fmt.Errorf("no enabled %s %s RPC node configured in rpc_nodes", mdb.NetworkTron, mdb.RpcNodeTypeHttp)
+		return nil, fmt.Errorf("no enabled %s %s RPC node configured in rpc_nodes", mdb.NetworkTron, mdb.RpcNodeTypeHttp)
 	}
 	rpcURL := strings.TrimRight(strings.TrimSpace(node.Url), "/")
 	if rpcURL == "" {
-		return "", "", fmt.Errorf("rpc_nodes id=%d has empty url", node.ID)
+		return nil, fmt.Errorf("rpc_nodes id=%d has empty url", node.ID)
 	}
-	return rpcURL, node.ApiKey, nil
+	node.Url = rpcURL
+	return node, nil
 }
 
 func ResolveTronNode() (string, string, error) {
 	return resolveTronNode()
 }
 
-func TryProcessTronTRC20Transfer(toAddr string, rawValue *big.Int, txHash string, blockTsMs int64) {
+func TryProcessTronTRC20Transfer(token mdb.ChainToken, toAddr string, rawValue *big.Int, txHash string, blockTsMs int64) {
+	tokenSym := strings.ToUpper(strings.TrimSpace(token.Symbol))
 	defer func() {
 		if err := recover(); err != nil {
-			log.Sugar.Errorf("[TRC20][%s] TryProcessTronTRC20Transfer panic: %v", toAddr, err)
+			log.Sugar.Errorf("[TRC20-%s][%s] TryProcessTronTRC20Transfer panic: %v", tokenSym, toAddr, err)
 		}
 	}()
 
 	addr := strings.TrimSpace(toAddr)
-	if addr == "" || rawValue == nil || rawValue.Sign() <= 0 {
+	if tokenSym == "" || addr == "" || rawValue == nil || rawValue.Sign() <= 0 {
 		return
+	}
+	decimals := token.Decimals
+	if decimals < 0 {
+		decimals = 0
 	}
 
 	decimalQuant := decimal.NewFromBigInt(rawValue, 0)
-	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.NewFromInt(1_000_000)).InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.New(1, int32(decimals))).InexactFloat64(), data.MaxAmountPrecision)
 	if amount <= 0 {
 		return
 	}
+	if token.MinAmount > 0 && amount < token.MinAmount {
+		log.Sugar.Debugf("[TRC20-%s][%s] skip below min amount hash=%s amount=%.2f min=%.2f", tokenSym, addr, txHash, amount, token.MinAmount)
+		return
+	}
 
-	tradeID, err := data.GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkTron, addr, "USDT", amount)
+	tradeID, err := data.GetTradeIdByWalletAddressAndAmountAndToken(mdb.NetworkTron, addr, tokenSym, amount)
 	if err != nil {
-		log.Sugar.Warnf("[TRC20][%s] lock lookup: %v", addr, err)
+		log.Sugar.Warnf("[TRC20-%s][%s] lock lookup: %v", tokenSym, addr, err)
 		return
 	}
 	if tradeID == "" {
-		log.Sugar.Debugf("[TRC20][%s] skip unmatched tx hash=%s amount=%.2f", addr, txHash, amount)
+		log.Sugar.Debugf("[TRC20-%s][%s] skip unmatched tx hash=%s amount=%.2f", tokenSym, addr, txHash, amount)
 		return
 	}
 
 	order, err := data.GetOrderInfoByTradeId(tradeID)
 	if err != nil {
-		log.Sugar.Warnf("[TRC20][%s] load order: %v", addr, err)
+		log.Sugar.Warnf("[TRC20-%s][%s] load order: %v", tokenSym, addr, err)
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(order.Network)) != mdb.NetworkTron {
+		log.Sugar.Warnf("[TRC20-%s][%s] skip trade_id=%s network=%q", tokenSym, addr, tradeID, order.Network)
+		return
+	}
+	if strings.ToUpper(strings.TrimSpace(order.Token)) != tokenSym {
+		log.Sugar.Warnf("[TRC20-%s][%s] skip trade_id=%s token mismatch order=%s", tokenSym, addr, tradeID, order.Token)
 		return
 	}
 	if blockTsMs > 0 && blockTsMs < order.CreatedAt.TimestampMilli() {
-		log.Sugar.Warnf("[TRC20][%s] skip tx %s because block time %d is before order create time %d", addr, txHash, blockTsMs, order.CreatedAt.TimestampMilli())
+		log.Sugar.Warnf("[TRC20-%s][%s] skip tx %s because block time %d is before order create time %d", tokenSym, addr, txHash, blockTsMs, order.CreatedAt.TimestampMilli())
 		return
 	}
 
 	req := &request.OrderProcessingRequest{
 		ReceiveAddress:     addr,
-		Token:              "USDT",
+		Token:              tokenSym,
 		Network:            mdb.NetworkTron,
 		TradeId:            tradeID,
 		Amount:             amount,
@@ -85,15 +112,15 @@ func TryProcessTronTRC20Transfer(toAddr string, rawValue *big.Int, txHash string
 	err = OrderProcessing(req)
 	if err != nil {
 		if errors.Is(err, constant.OrderBlockAlreadyProcess) || errors.Is(err, constant.OrderStatusConflict) {
-			log.Sugar.Infof("[TRC20][%s] skip resolved transfer trade_id=%s hash=%s err=%v", addr, tradeID, txHash, err)
+			log.Sugar.Infof("[TRC20-%s][%s] skip resolved transfer trade_id=%s hash=%s err=%v", tokenSym, addr, tradeID, txHash, err)
 			return
 		}
-		log.Sugar.Errorf("[TRC20][%s] OrderProcessing trade_id=%s hash=%s: %v", addr, tradeID, txHash, err)
+		log.Sugar.Errorf("[TRC20-%s][%s] OrderProcessing trade_id=%s hash=%s: %v", tokenSym, addr, tradeID, txHash, err)
 		return
 	}
 
 	sendPaymentNotification(order)
-	log.Sugar.Infof("[TRC20][%s] payment processed trade_id=%s hash=%s", addr, tradeID, txHash)
+	log.Sugar.Infof("[TRC20-%s][%s] payment processed trade_id=%s hash=%s", tokenSym, addr, tradeID, txHash)
 }
 
 func TryProcessTronTRXTransfer(toAddr string, rawSun int64, txHash string, blockTsMs int64) {
@@ -109,7 +136,7 @@ func TryProcessTronTRXTransfer(toAddr string, rawSun int64, txHash string, block
 	}
 
 	decimalQuant := decimal.NewFromInt(rawSun)
-	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.NewFromInt(1_000_000)).InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalQuant.Div(decimal.NewFromInt(1_000_000)).InexactFloat64(), data.MaxAmountPrecision)
 	if amount <= 0 {
 		return
 	}
@@ -178,69 +205,40 @@ func TryProcessEvmERC20Transfer(chainNetwork string, contract common.Address, to
 		}
 	}()
 
-	var usdt, usdc common.Address
-	var polygonUsdcE common.Address
-	switch chainNetwork {
-	case mdb.NetworkEthereum:
-		usdt = common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7")
-		usdc = common.HexToAddress("0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
-	case mdb.NetworkBsc:
-		usdt = common.HexToAddress("0x55d398326f99059fF775485246999027B3197955")
-		usdc = common.HexToAddress("0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d")
-	case mdb.NetworkPolygon:
-		usdt = common.HexToAddress("0xc2132D05D31c914a87C6611C10748AEb04B58e8F")
-		usdc = common.HexToAddress("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359")
-		polygonUsdcE = common.HexToAddress("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174")
-	case mdb.NetworkPlasma:
-		// USDT0（官方），6 decimals；链上暂无与 ETH 同级的 Circle USDC 部署，仅匹配 USDT 订单
-		usdt = common.HexToAddress("0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb")
-	default:
-		return
-	}
-
-	var tokenSym string
-	switch {
-	case contract == usdt:
-		tokenSym = "USDT"
-	case contract == usdc || (polygonUsdcE != (common.Address{}) && contract == polygonUsdcE):
-		tokenSym = "USDC"
-	default:
-		net := evmChainLogLabel(chainNetwork)
-		log.Sugar.Warnf("[%s-WS] skip unsupported contract %s", net, contract.Hex())
-		return
-	}
-
 	net := evmChainLogLabel(chainNetwork)
+	tokenConfig, err := data.GetEnabledChainTokenByContract(chainNetwork, contract.Hex())
+	if err != nil {
+		log.Sugar.Warnf("[%s-WS] load chain token contract=%s: %v", net, contract.Hex(), err)
+		return
+	}
+	if tokenConfig == nil || tokenConfig.ID == 0 {
+		log.Sugar.Warnf("[%s-WS] skip unconfigured contract %s", net, contract.Hex())
+		return
+	}
+	tokenSym := strings.ToUpper(strings.TrimSpace(tokenConfig.Symbol))
+	if tokenSym == "" {
+		log.Sugar.Warnf("[%s-WS] skip contract %s with empty token symbol", net, contract.Hex())
+		return
+	}
 	walletAddr := strings.ToLower(toAddr.Hex())
 	if rawValue == nil || rawValue.Sign() <= 0 {
 		log.Sugar.Infof("[%s-%s][%s] skip non-positive or nil amount", net, tokenSym, walletAddr)
 		return
 	}
-
-	chainTokens, err := data.ListChainTokens(chainNetwork)
-	if err != nil {
-		log.Sugar.Warnf("[%s-%s] load chain tokens: %v", net, tokenSym, err)
-		return
+	decimals := tokenConfig.Decimals
+	if decimals < 0 {
+		decimals = 0
 	}
-	var tokenConfig *mdb.ChainToken
-	for _, t := range chainTokens {
-		if strings.EqualFold(t.Symbol, tokenSym) {
-			tokenConfig = &t
-			break
-		}
-	}
-	if tokenConfig == nil || !tokenConfig.Enabled {
-		log.Sugar.Warnf("[%s-%s] token not enabled or configured in chain_tokens", net, tokenSym)
-		return
-	}
-
-	pow := decimal.New(1, int32(tokenConfig.Decimals))
-	log.Sugar.Warnf("tokenConfig.Decimals %d pow %s", tokenConfig.Decimals, pow.String())
+	pow := decimal.New(1, int32(decimals))
 
 	decimalQuant := decimal.NewFromBigInt(rawValue, 0)
-	amount := math.MustParsePrecFloat64(decimalQuant.Div(pow).InexactFloat64(), 2)
+	amount := math.MustParsePrecFloat64(decimalQuant.Div(pow).InexactFloat64(), data.MaxAmountPrecision)
 	if amount <= 0 {
 		log.Sugar.Warnf("[%s-%s][%s] skip non-positive amount %.2f", net, tokenSym, walletAddr, amount)
+		return
+	}
+	if tokenConfig.MinAmount > 0 && amount < tokenConfig.MinAmount {
+		log.Sugar.Debugf("[%s-%s][%s] skip below min amount hash=%s amount=%.2f min=%.2f", net, tokenSym, walletAddr, txHash, amount, tokenConfig.MinAmount)
 		return
 	}
 
@@ -267,6 +265,10 @@ func TryProcessEvmERC20Transfer(chainNetwork string, contract common.Address, to
 	}
 	if strings.ToUpper(strings.TrimSpace(order.Token)) != tokenSym {
 		log.Sugar.Warnf("[%s-%s][%s] skip trade_id=%s token mismatch order=%s", net, tokenSym, walletAddr, tradeID, order.Token)
+		return
+	}
+	if blockTsMs > 0 && blockTsMs < order.CreatedAt.TimestampMilli() {
+		log.Sugar.Warnf("[%s-%s][%s] skip tx %s because block time %d is before order create time %d", net, tokenSym, walletAddr, txHash, blockTsMs, order.CreatedAt.TimestampMilli())
 		return
 	}
 
@@ -305,11 +307,13 @@ func sendPaymentNotification(order *mdb.Orders) {
 		}
 	}
 
+	precision := data.GetAmountPrecision()
+	amountFormat := fmt.Sprintf("%%.%df", precision)
 	msg := fmt.Sprintf(
 		"🎉 <b>收款成功通知</b>\n\n"+
 			"💰 <b>金额信息</b>\n"+
-			"├ 订单金额：<code>%.2f %s</code>\n"+
-			"└ 实际到账：<code>%.2f %s</code>\n\n"+
+			"├ 订单金额：<code>"+amountFormat+" %s</code>\n"+
+			"└ 实际到账：<code>"+amountFormat+" %s</code>\n\n"+
 			"📋 <b>订单信息</b>\n"+
 			"├ 交易号：<code>%s</code>\n"+
 			"├ 订单号：<code>%s</code>\n"+
