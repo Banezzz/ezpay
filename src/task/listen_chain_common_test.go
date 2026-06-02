@@ -18,6 +18,34 @@ func TestResolveChainWsURLRequiresEnabledRpcNode(t *testing.T) {
 	}
 }
 
+func TestLoadChainTokenContractsDedupesBscAliases(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	const contract = "0x55d398326f99059fF775485246999027B3197955"
+	if err := dao.Mdb.Model(&mdb.ChainToken{}).
+		Where("network = ? AND symbol = ?", mdb.NetworkBsc, "USDT").
+		Updates(map[string]interface{}{
+			"contract_address": contract,
+			"decimals":         18,
+		}).Error; err != nil {
+		t.Fatalf("update canonical bsc token: %v", err)
+	}
+	if err := dao.Mdb.Create(&[]mdb.ChainToken{
+		{Network: mdb.NetworkBscLegacy, Symbol: "USDT", ContractAddress: contract, Decimals: 18, Enabled: true},
+	}).Error; err != nil {
+		t.Fatalf("seed chain_tokens: %v", err)
+	}
+
+	got := loadChainTokenContracts(mdb.NetworkBsc, "[TEST]")
+	if len(got) != 1 {
+		t.Fatalf("contract count = %d, want 1: %#v", len(got), got)
+	}
+	if got[0].Hex() != "0x55d398326f99059fF775485246999027B3197955" {
+		t.Fatalf("contract = %s, want %s", got[0].Hex(), contract)
+	}
+}
+
 func TestResolveChainWsURLWithRow(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()

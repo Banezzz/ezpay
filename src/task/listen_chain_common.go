@@ -60,9 +60,15 @@ func chainTokenFingerprint(network string) string {
 	if err != nil {
 		return ""
 	}
+	seen := make(map[string]struct{}, len(tokens))
 	parts := make([]string, 0, len(tokens))
 	for _, t := range tokens {
-		parts = append(parts, strings.ToLower(strings.TrimSpace(t.ContractAddress))+"|"+strings.ToUpper(strings.TrimSpace(t.Symbol)))
+		part := strings.ToLower(strings.TrimSpace(t.ContractAddress)) + "|" + strings.ToUpper(strings.TrimSpace(t.Symbol))
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		parts = append(parts, part)
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
@@ -78,13 +84,20 @@ func loadChainTokenContracts(network, logPrefix string) []common.Address {
 		log.Sugar.Errorf("%s load chain_tokens err=%v", logPrefix, err)
 		return nil
 	}
+	seen := make(map[string]struct{}, len(tokens))
 	addrs := make([]common.Address, 0, len(tokens))
 	for _, t := range tokens {
 		c := strings.TrimSpace(t.ContractAddress)
 		if c == "" {
 			continue
 		}
-		addrs = append(addrs, common.HexToAddress(c))
+		addr := common.HexToAddress(c)
+		key := strings.ToLower(addr.Hex())
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		addrs = append(addrs, addr)
 	}
 	return addrs
 }

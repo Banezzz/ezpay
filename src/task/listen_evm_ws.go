@@ -72,7 +72,22 @@ func runEvmWsLogListener(ctx context.Context, logPrefix string, resolveNode evmN
 			continue
 		}
 
-		backfillRecentEVMLogs(ctx, client, logPrefix, query, handleLog)
+		if !backfillRecentEVMLogs(ctx, client, logPrefix, query, handleLog) {
+			client.Close()
+			if ctx.Err() != nil {
+				return
+			}
+			err := fmt.Errorf("backfill failed")
+			markRpcNodeDown(node, logPrefix, err)
+			if recordEvmWsNodeFailure(logPrefix, node, "backfill") {
+				return
+			}
+			if !sleepOrDone(ctx, failWait) {
+				return
+			}
+			failWait = nextBackoff(failWait, maxBackoff)
+			continue
+		}
 
 		logsCh := make(chan types.Log, 256)
 		sub, err := client.SubscribeFilterLogs(ctx, query, logsCh)
@@ -161,21 +176,21 @@ func evmTransferQuery(contracts []common.Address, recipientTopics []common.Hash)
 	}
 }
 
-func backfillRecentEVMLogs(ctx context.Context, client *ethclient.Client, logPrefix string, query ethereum.FilterQuery, handleLog evmLogHandler) {
+func backfillRecentEVMLogs(ctx context.Context, client *ethclient.Client, logPrefix string, query ethereum.FilterQuery, handleLog evmLogHandler) bool {
 	latest, err := client.HeaderByNumber(ctx, nil)
 	if err != nil {
 		log.Sugar.Warnf("%s backfill latest block: %v", logPrefix, err)
-		return
+		return false
 	}
 	if latest == nil || latest.Number == nil {
 		log.Sugar.Warnf("%s backfill latest block missing number", logPrefix)
-		return
+		return false
 	}
 
 	latestNumber := latest.Number.Uint64()
 	confirmations := config.GetEVMConfirmations()
 	if latestNumber+1 <= confirmations {
-		return
+		return true
 	}
 
 	toBlock := latestNumber + 1 - confirmations
@@ -187,7 +202,7 @@ func backfillRecentEVMLogs(ctx context.Context, client *ethclient.Client, logPre
 	processed := 0
 	for start := fromBlock; start <= toBlock; {
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 
 		end := start + evmBackfillChunkSize - 1
@@ -201,12 +216,12 @@ func backfillRecentEVMLogs(ctx context.Context, client *ethclient.Client, logPre
 		logs, err := client.FilterLogs(ctx, chunkQuery)
 		if err != nil {
 			log.Sugar.Warnf("%s backfill logs blocks=%d-%d: %v", logPrefix, start, end, err)
-			return
+			return false
 		}
 
 		for _, vLog := range logs {
 			if ctx.Err() != nil {
-				return
+				return false
 			}
 			blockTsMs, ok := waitForConfirmedEVMLog(ctx, client, vLog, logPrefix)
 			if !ok {
@@ -225,6 +240,7 @@ func backfillRecentEVMLogs(ctx context.Context, client *ethclient.Client, logPre
 	if processed > 0 {
 		log.Sugar.Infof("%s backfilled %d log(s) from blocks %d-%d", logPrefix, processed, fromBlock, toBlock)
 	}
+	return true
 }
 
 func recvLoop(ctx context.Context, client *ethclient.Client, sub ethereum.Subscription, logsCh <-chan types.Log, logPrefix string, handleLog evmLogHandler) error {
