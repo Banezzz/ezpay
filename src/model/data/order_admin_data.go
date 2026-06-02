@@ -62,7 +62,7 @@ func buildOrderListQuery(f OrderListFilter) *gorm.DB {
 		tx = tx.Where("status = ?", f.Status)
 	}
 	if f.Network != "" {
-		tx = tx.Where("network = ?", strings.ToLower(f.Network))
+		tx = tx.Where("network IN ?", mdb.NetworkAliases(f.Network))
 	}
 	if f.Token != "" {
 		tx = tx.Where("token = ?", strings.ToUpper(f.Token))

@@ -43,6 +43,30 @@ func TestSelectRpcNodeUsesHealthyRow(t *testing.T) {
 	}
 }
 
+func TestSelectRpcNodeUsesLegacyBscRows(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if err := dao.Mdb.Create(&mdb.RpcNode{
+		Network: mdb.NetworkBscLegacy,
+		Url:     "wss://legacy-bsc.example.com",
+		Type:    mdb.RpcNodeTypeWs,
+		Weight:  1,
+		Enabled: true,
+		Status:  mdb.RpcNodeStatusOk,
+	}).Error; err != nil {
+		t.Fatalf("seed legacy bsc rpc_node: %v", err)
+	}
+
+	got, err := SelectRpcNode(mdb.NetworkBsc, mdb.RpcNodeTypeWs)
+	if err != nil {
+		t.Fatalf("SelectRpcNode(): %v", err)
+	}
+	if got == nil || got.Url != "wss://legacy-bsc.example.com" {
+		t.Fatalf("SelectRpcNode() = %#v, want legacy bsc row", got)
+	}
+}
+
 func TestSelectRpcNodeFallsBackToUnknownOnly(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()

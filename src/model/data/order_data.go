@@ -34,12 +34,12 @@ func normalizeLockAmount(amount float64) (int64, string) {
 }
 
 func normalizeLockNetwork(network string) string {
-	return strings.ToLower(strings.TrimSpace(network))
+	return mdb.NormalizeNetwork(network)
 }
 
 func normalizeLockAddress(network, address string) string {
 	address = strings.TrimSpace(address)
-	if isEVMNetwork(normalizeLockNetwork(network)) {
+	if mdb.IsEVMNetwork(normalizeLockNetwork(network)) {
 		return strings.ToLower(address)
 	}
 	return address
@@ -60,7 +60,7 @@ func applyLockAddressFilter(tx *gorm.DB, network, address string) *gorm.DB {
 
 func activeLocksForAddress(tx *gorm.DB, network, address, token string, now time.Time) *gorm.DB {
 	query := tx.Model(&mdb.TransactionLock{}).
-		Where("network = ?", normalizeLockNetwork(network)).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("token = ?", normalizeLockToken(token)).
 		Where("expires_at > ?", now)
 	return applyLockAddressFilter(query, network, address)
@@ -224,7 +224,7 @@ func GetSubOrderByTokenNetwork(parentTradeId string, token string, network strin
 	err := dao.Mdb.Model(order).
 		Where("parent_trade_id = ?", parentTradeId).
 		Where("token = ?", token).
-		Where("network = ?", network).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("status = ?", mdb.StatusWaitPay).
 		Limit(1).
 		Find(order).Error

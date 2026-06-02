@@ -62,13 +62,13 @@ type WalletListItem struct {
 // @Failure      400 {object} response.ApiResponse
 // @Router       /admin/api/v1/wallets [get]
 func (c *BaseAdminController) AdminListWallets(ctx echo.Context) error {
-	network := strings.ToLower(strings.TrimSpace(ctx.QueryParam("network")))
+	network := mdb.NormalizeNetwork(ctx.QueryParam("network"))
 	status := strings.TrimSpace(ctx.QueryParam("status"))
 	keyword := strings.TrimSpace(ctx.QueryParam("keyword"))
 
 	tx := dao.Mdb.Model(&mdb.WalletAddress{})
 	if network != "" {
-		tx = tx.Where("network = ?", network)
+		tx = tx.Where("network IN ?", mdb.NetworkAliases(network))
 	}
 	if status != "" {
 		if s, err := strconv.Atoi(status); err == nil {

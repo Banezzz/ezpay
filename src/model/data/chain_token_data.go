@@ -12,8 +12,8 @@ import (
 func ListEnabledChainTokens(network string) ([]mdb.ChainToken, error) {
 	var rows []mdb.ChainToken
 	tx := dao.Mdb.Model(&mdb.ChainToken{}).Where("enabled = ?", true)
-	if n := strings.ToLower(strings.TrimSpace(network)); n != "" {
-		tx = tx.Where("network = ?", n)
+	if n := mdb.NormalizeNetwork(network); n != "" {
+		tx = tx.Where("network IN ?", mdb.NetworkAliases(n))
 	}
 	err := tx.Order("network ASC, id ASC").Find(&rows).Error
 	return rows, err
@@ -24,7 +24,7 @@ func ListChainTokens(network string) ([]mdb.ChainToken, error) {
 	var rows []mdb.ChainToken
 	tx := dao.Mdb.Model(&mdb.ChainToken{})
 	if network != "" {
-		tx = tx.Where("network = ?", strings.ToLower(network))
+		tx = tx.Where("network IN ?", mdb.NetworkAliases(network))
 	}
 	err := tx.Order("id ASC").Find(&rows).Error
 	return rows, err
@@ -35,7 +35,7 @@ func ListChainTokens(network string) ([]mdb.ChainToken, error) {
 func ListEnabledChainTokensByNetwork(network string) ([]mdb.ChainToken, error) {
 	var rows []mdb.ChainToken
 	err := dao.Mdb.Model(&mdb.ChainToken{}).
-		Where("network = ?", strings.ToLower(network)).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("enabled = ?", true).
 		Find(&rows).Error
 	return rows, err
@@ -51,12 +51,17 @@ func GetEnabledChainTokenByContract(network, contractAddress string) (*mdb.Chain
 	if addr == "" {
 		return row, nil
 	}
-	err := dao.Mdb.Model(row).
-		Where("network = ?", strings.ToLower(strings.TrimSpace(network))).
-		Where("enabled = ?", true).
-		Where("LOWER(contract_address) = ?", strings.ToLower(addr)).
-		Limit(1).Find(row).Error
-	return row, err
+	for _, candidate := range mdb.NetworkAliases(network) {
+		err := dao.Mdb.Model(row).
+			Where("network = ?", candidate).
+			Where("enabled = ?", true).
+			Where("LOWER(contract_address) = ?", strings.ToLower(addr)).
+			Limit(1).Find(row).Error
+		if err != nil || row.ID > 0 {
+			return row, err
+		}
+	}
+	return row, nil
 }
 
 // GetEnabledChainTokenBySymbol finds one enabled token by (network, symbol).
@@ -67,12 +72,17 @@ func GetEnabledChainTokenBySymbol(network, symbol string) (*mdb.ChainToken, erro
 	if sym == "" {
 		return row, nil
 	}
-	err := dao.Mdb.Model(row).
-		Where("network = ?", strings.ToLower(strings.TrimSpace(network))).
-		Where("enabled = ?", true).
-		Where("UPPER(symbol) = ?", strings.ToUpper(sym)).
-		Limit(1).Find(row).Error
-	return row, err
+	for _, candidate := range mdb.NetworkAliases(network) {
+		err := dao.Mdb.Model(row).
+			Where("network = ?", candidate).
+			Where("enabled = ?", true).
+			Where("UPPER(symbol) = ?", strings.ToUpper(sym)).
+			Limit(1).Find(row).Error
+		if err != nil || row.ID > 0 {
+			return row, err
+		}
+	}
+	return row, nil
 }
 
 // GetChainTokenByID fetches by primary key.
@@ -87,6 +97,7 @@ func GetChainTokenByID(id uint64) (*mdb.ChainToken, error) {
 // restored with the incoming field values rather than creating a duplicate
 // that would violate the unique index.
 func CreateChainToken(row *mdb.ChainToken) error {
+	row.Network = mdb.NormalizeNetwork(row.Network)
 	deleted := new(mdb.ChainToken)
 	err := dao.Mdb.Unscoped().
 		Where("network = ? AND symbol = ? AND deleted_at IS NOT NULL", row.Network, row.Symbol).

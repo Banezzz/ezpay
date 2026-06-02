@@ -45,12 +45,10 @@ func apiKeyID(apiKey *mdb.ApiKey) uint64 {
 func normalizeOrderAddressByNetwork(network, address string) string {
 	network = strings.ToLower(strings.TrimSpace(network))
 	address = strings.TrimSpace(address)
-	switch network {
-	case mdb.NetworkEthereum, mdb.NetworkBsc, mdb.NetworkPolygon, mdb.NetworkPlasma:
+	if mdb.IsEVMNetwork(network) {
 		return strings.ToLower(address)
-	default:
-		return address
 	}
+	return address
 }
 
 // CreateTransaction creates a new payment order.

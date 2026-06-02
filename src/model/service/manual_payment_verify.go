@@ -77,7 +77,7 @@ func validateManualOrderPaymentDefault(order *mdb.Orders, blockTransactionID str
 
 	var canonicalTxID string
 	var err error
-	switch strings.ToLower(strings.TrimSpace(order.Network)) {
+	switch mdb.NormalizeNetwork(order.Network) {
 	case mdb.NetworkTron:
 		canonicalTxID, err = validateManualTronPayment(order, txID)
 	case mdb.NetworkSolana:
@@ -115,7 +115,7 @@ func ensureManualBlockTransactionUnused(order *mdb.Orders, canonicalTxID string)
 }
 
 func manualBlockTransactionIDIsHex(network string) bool {
-	switch strings.ToLower(strings.TrimSpace(network)) {
+	switch mdb.NormalizeNetwork(network) {
 	case mdb.NetworkTron, mdb.NetworkEthereum, mdb.NetworkBsc, mdb.NetworkPolygon, mdb.NetworkPlasma:
 		return true
 	default:
@@ -124,7 +124,7 @@ func manualBlockTransactionIDIsHex(network string) bool {
 }
 
 func equivalentManualBlockTransactionIDs(network, canonicalTxID string) []string {
-	network = strings.ToLower(strings.TrimSpace(network))
+	network = mdb.NormalizeNetwork(network)
 	canonicalTxID = strings.TrimSpace(canonicalTxID)
 	seen := make(map[string]struct{})
 	out := make([]string, 0, 6)

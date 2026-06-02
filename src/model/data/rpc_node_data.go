@@ -44,7 +44,7 @@ func ListRpcNodes(network string) ([]mdb.RpcNode, error) {
 	var rows []mdb.RpcNode
 	tx := dao.Mdb.Model(&mdb.RpcNode{})
 	if network != "" {
-		tx = tx.Where("network = ?", strings.ToLower(network))
+		tx = tx.Where("network IN ?", mdb.NetworkAliases(network))
 	}
 	err := tx.Order("id ASC").Find(&rows).Error
 	return rows, err
@@ -68,7 +68,7 @@ func ListRpcNodesForHealth() ([]mdb.RpcNode, error) {
 func ListGeneralRpcCandidates(network, nodeType string) ([]mdb.RpcNode, error) {
 	var rows []mdb.RpcNode
 	err := dao.Mdb.Model(&mdb.RpcNode{}).
-		Where("network = ?", strings.ToLower(strings.TrimSpace(network))).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("type = ?", strings.ToLower(strings.TrimSpace(nodeType))).
 		Where("enabled = ?", true).
 		Where("(purpose IN ? OR purpose = '' OR purpose IS NULL)", []string{mdb.RpcNodePurposeGeneral, mdb.RpcNodePurposeBoth}).
@@ -146,7 +146,7 @@ func CreateRpcNode(row *mdb.RpcNode) error {
 // enabled/disabled choices are preserved so an admin-disabled node is
 // not silently re-enabled by automatic discovery.
 func UpsertRpcNodeByNetworkURLType(row *mdb.RpcNode) (bool, error) {
-	network := strings.ToLower(strings.TrimSpace(row.Network))
+	network := mdb.NormalizeNetwork(row.Network)
 	nodeType := strings.ToLower(strings.TrimSpace(row.Type))
 	rpcURL := strings.TrimSpace(row.Url)
 	if network == "" || nodeType == "" || rpcURL == "" {
@@ -212,7 +212,7 @@ func DeleteRpcNodeByID(id uint64) error {
 func SelectRpcNode(network, nodeType string) (*mdb.RpcNode, error) {
 	var rows []mdb.RpcNode
 	err := dao.Mdb.Model(&mdb.RpcNode{}).
-		Where("network = ?", strings.ToLower(network)).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("type = ?", strings.ToLower(nodeType)).
 		Where("enabled = ?", true).
 		Where("(purpose IN ? OR purpose = '' OR purpose IS NULL)", []string{mdb.RpcNodePurposeGeneral, mdb.RpcNodePurposeBoth}).
@@ -249,7 +249,7 @@ func SelectRpcNode(network, nodeType string) (*mdb.RpcNode, error) {
 func ListManualPaymentRpcCandidates(network, nodeType string) ([]mdb.RpcNode, error) {
 	var rows []mdb.RpcNode
 	err := dao.Mdb.Model(&mdb.RpcNode{}).
-		Where("network = ?", strings.ToLower(strings.TrimSpace(network))).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("type = ?", strings.ToLower(strings.TrimSpace(nodeType))).
 		Where("enabled = ?", true).
 		Where("(status IN ? OR status = '' OR status IS NULL)", []string{mdb.RpcNodeStatusOk, mdb.RpcNodeStatusUnknown}).
@@ -425,7 +425,7 @@ func UpdateRpcNodeHealth(id uint64, status string, latencyMs int) error {
 // UpdateRpcNodeHealthByNetworkURLType refreshes health for an existing
 // node if present. It is a no-op for unknown URLs.
 func UpdateRpcNodeHealthByNetworkURLType(network, rpcURL, nodeType, status string, latencyMs int) error {
-	network = strings.ToLower(strings.TrimSpace(network))
+	network = mdb.NormalizeNetwork(network)
 	nodeType = strings.ToLower(strings.TrimSpace(nodeType))
 	rpcURL = strings.TrimSpace(rpcURL)
 	if network == "" || nodeType == "" || rpcURL == "" {

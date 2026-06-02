@@ -1,18 +1,53 @@
 package mdb
 
+import "strings"
+
 const (
 	TokenStatusEnable  = 1
 	TokenStatusDisable = 2
 )
 
 const (
-	NetworkTron     = "tron"
-	NetworkSolana   = "solana"
-	NetworkEthereum = "ethereum"
-	NetworkBsc      = "binance"
-	NetworkPolygon  = "polygon"
-	NetworkPlasma   = "plasma"
+	NetworkTron      = "tron"
+	NetworkSolana    = "solana"
+	NetworkEthereum  = "ethereum"
+	NetworkBsc       = "bsc"
+	NetworkBscLegacy = "binance"
+	NetworkPolygon   = "polygon"
+	NetworkPlasma    = "plasma"
 )
+
+func NormalizeNetwork(network string) string {
+	network = strings.ToLower(strings.TrimSpace(network))
+	if network == NetworkBscLegacy {
+		return NetworkBsc
+	}
+	return network
+}
+
+func NetworkAliases(network string) []string {
+	network = NormalizeNetwork(network)
+	if network == "" {
+		return nil
+	}
+	if network == NetworkBsc {
+		return []string{NetworkBsc, NetworkBscLegacy}
+	}
+	return []string{network}
+}
+
+func SameNetwork(a, b string) bool {
+	return NormalizeNetwork(a) == NormalizeNetwork(b)
+}
+
+func IsEVMNetwork(network string) bool {
+	switch NormalizeNetwork(network) {
+	case NetworkEthereum, NetworkBsc, NetworkPolygon, NetworkPlasma:
+		return true
+	default:
+		return false
+	}
+}
 
 const (
 	WalletSourceManual = "manual"

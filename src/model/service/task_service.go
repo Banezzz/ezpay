@@ -259,7 +259,7 @@ func TryProcessEvmERC20Transfer(chainNetwork string, contract common.Address, to
 		log.Sugar.Warnf("[%s-%s][%s] load order: %v", net, tokenSym, walletAddr, err)
 		return
 	}
-	if strings.ToLower(strings.TrimSpace(order.Network)) != chainNetwork {
+	if !mdb.SameNetwork(order.Network, chainNetwork) {
 		log.Sugar.Warnf("[%s-%s][%s] skip trade_id=%s network=%q", net, tokenSym, walletAddr, tradeID, order.Network)
 		return
 	}
@@ -337,7 +337,7 @@ func sendPaymentNotification(order *mdb.Orders) {
 }
 
 func networkDisplay(n string) string {
-	switch strings.ToLower(strings.TrimSpace(n)) {
+	switch mdb.NormalizeNetwork(n) {
 	case mdb.NetworkTron:
 		return "Tron"
 	case mdb.NetworkSolana:

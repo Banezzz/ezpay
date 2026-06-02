@@ -59,6 +59,34 @@ func TestGetAvailableWalletAddressByNetworkReturnsLowercaseForEvm(t *testing.T) 
 	}
 }
 
+func TestGetAvailableWalletAddressByNetworkIncludesLegacyBscRows(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	mixed := "0xA1B2c3D4e5F60718293aBcDeF001122334455667"
+	if err := dao.Mdb.Create(&mdb.WalletAddress{
+		Network: mdb.NetworkBscLegacy,
+		Address: mixed,
+		Status:  mdb.TokenStatusEnable,
+	}).Error; err != nil {
+		t.Fatalf("seed legacy bsc wallet: %v", err)
+	}
+
+	rows, err := GetAvailableWalletAddressByNetwork(mdb.NetworkBsc)
+	if err != nil {
+		t.Fatalf("list wallets: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("wallet count = %d, want 1", len(rows))
+	}
+	if rows[0].Network != mdb.NetworkBscLegacy {
+		t.Fatalf("wallet network = %q, want legacy %q", rows[0].Network, mdb.NetworkBscLegacy)
+	}
+	if rows[0].Address != strings.ToLower(mixed) {
+		t.Fatalf("listed wallet address = %q, want lowercase", rows[0].Address)
+	}
+}
+
 func TestAddWalletAddressWithNetworkKeepsOriginalCaseForNonEvm(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()

@@ -1,8 +1,6 @@
 package data
 
 import (
-	"strings"
-
 	"github.com/Banezzz/ezpay/model/dao"
 	"github.com/Banezzz/ezpay/model/mdb"
 )
@@ -26,10 +24,15 @@ func ListEnabledChains() ([]mdb.Chain, error) {
 // GetChainByNetwork fetches one row by network key.
 func GetChainByNetwork(network string) (*mdb.Chain, error) {
 	row := new(mdb.Chain)
-	err := dao.Mdb.Model(row).
-		Where("network = ?", strings.ToLower(strings.TrimSpace(network))).
-		Limit(1).Find(row).Error
-	return row, err
+	for _, candidate := range mdb.NetworkAliases(network) {
+		err := dao.Mdb.Model(row).
+			Where("network = ?", candidate).
+			Limit(1).Find(row).Error
+		if err != nil || row.ID > 0 {
+			return row, err
+		}
+	}
+	return row, nil
 }
 
 // IsChainEnabled returns whether the row exists and Enabled=true. A
@@ -49,6 +52,6 @@ func UpdateChainFields(network string, fields map[string]interface{}) error {
 		return nil
 	}
 	return dao.Mdb.Model(&mdb.Chain{}).
-		Where("network = ?", strings.ToLower(strings.TrimSpace(network))).
+		Where("network = ?", mdb.NormalizeNetwork(network)).
 		Updates(fields).Error
 }

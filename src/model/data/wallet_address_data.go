@@ -15,15 +15,11 @@ func AddWalletAddress(address string) (*mdb.WalletAddress, error) {
 
 // isEVMNetwork 判断是否是 EVM 网络
 func isEVMNetwork(network string) bool {
-	switch network {
-	case mdb.NetworkEthereum, mdb.NetworkBsc, mdb.NetworkPolygon, mdb.NetworkPlasma:
-		return true
-	}
-	return false
+	return mdb.IsEVMNetwork(network)
 }
 
 func normalizeWalletNetwork(network string) string {
-	return strings.ToLower(strings.TrimSpace(network))
+	return mdb.NormalizeNetwork(network)
 }
 
 func normalizeWalletAddressByNetwork(network, address string) string {
@@ -50,7 +46,7 @@ func AddWalletAddressWithNetwork(network, address string) (*mdb.WalletAddress, e
 	// Check for a soft-deleted record with the same (network, address) and restore it.
 	deleted := new(mdb.WalletAddress)
 	err = dao.Mdb.Unscoped().
-		Where("network = ? AND address = ? AND deleted_at IS NOT NULL", network, address).
+		Where("network IN ? AND address = ? AND deleted_at IS NOT NULL", mdb.NetworkAliases(network), address).
 		Limit(1).Find(deleted).Error
 	if err != nil {
 		return nil, err
@@ -78,7 +74,7 @@ func GetWalletAddressByNetworkAndAddress(network, address string) (*mdb.WalletAd
 	address = normalizeWalletAddressByNetwork(network, address)
 	walletAddress := new(mdb.WalletAddress)
 	err := dao.Mdb.Model(walletAddress).
-		Where("network = ?", network).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Where("address = ?", address).
 		Limit(1).Find(walletAddress).Error
 	return walletAddress, err
@@ -126,7 +122,7 @@ func GetAvailableWalletAddressByNetwork(network string) ([]mdb.WalletAddress, er
 	var list []mdb.WalletAddress
 	err := dao.Mdb.Model(list).
 		Where("status = ?", mdb.TokenStatusEnable).
-		Where("network = ?", network).
+		Where("network IN ?", mdb.NetworkAliases(network)).
 		Find(&list).Error
 	if err != nil {
 		return nil, err
@@ -150,7 +146,7 @@ func GetAllWalletAddress() ([]mdb.WalletAddress, error) {
 func GetAllWalletAddressByNetwork(network string) ([]mdb.WalletAddress, error) {
 	network = normalizeWalletNetwork(network)
 	var list []mdb.WalletAddress
-	err := dao.Mdb.Model(list).Where("network = ?", network).Find(&list).Error
+	err := dao.Mdb.Model(list).Where("network IN ?", mdb.NetworkAliases(network)).Find(&list).Error
 	if err != nil {
 		return nil, err
 	}
