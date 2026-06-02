@@ -37,13 +37,15 @@ func TestCollectChainlistWSCandidatesFiltersSupportedNetworks(t *testing.T) {
 	}
 
 	got := collectChainlistWSCandidates(chains)
-	if len(got) != 1 {
-		t.Fatalf("len(candidates) = %d, want 1: %#v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("len(candidates) = %d, want 2: %#v", len(got), got)
 	}
-	if got[0].Network != mdb.NetworkBsc {
-		t.Fatalf("network = %q, want %q", got[0].Network, mdb.NetworkBsc)
+	for _, candidate := range got {
+		if candidate.Network != mdb.NetworkBsc {
+			t.Fatalf("network = %q, want %q", candidate.Network, mdb.NetworkBsc)
+		}
 	}
-	if got[0].URL != "wss://bsc.example/ws" {
-		t.Fatalf("url = %q, want normalized wss://bsc.example/ws", got[0].URL)
+	if got[0].URL != "https://bsc.example" || got[1].URL != "wss://bsc.example/ws" {
+		t.Fatalf("urls = %#v, want normalized http and ws candidates", got)
 	}
 }
