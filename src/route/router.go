@@ -53,10 +53,12 @@ func RegisterPublicRoutes(e *echo.Echo) {
 
 	// EZPay v1 routes (primary)
 	ezpayV1 := paymentRoute.Group("/ezpay/v1")
+	ezpayV1.GET("/config", comm.Ctrl.GetPublicConfig)
 	ezpayV1.GET("/supported-assets", comm.Ctrl.GetCheckoutSupportedAssets)
 
 	// GMPay v1 routes (deprecated, kept for backward compatibility)
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
+	gmpayV1.GET("/config", comm.Ctrl.GetPublicConfig)
 	gmpayV1.GET("/supported-assets", comm.Ctrl.GetCheckoutSupportedAssets)
 }
 
@@ -73,7 +75,6 @@ func RegisterInternalRoutes(e *echo.Echo) {
 	// GMPay v1 routes (deprecated, kept for backward compatibility)
 	gmpayV1 := paymentRoute.Group("/gmpay/v1")
 	gmpayV1.POST("/order/create-transaction", comm.Ctrl.CreateTransaction, middleware.CheckApiSign())
-	gmpayV1.GET("/config", comm.Ctrl.GetPublicConfig)
 
 	// okpay v1 routes
 	okpayV1 := paymentRoute.Group("/okpay/v1")

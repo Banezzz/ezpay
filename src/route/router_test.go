@@ -268,6 +268,31 @@ func TestSplitRouteSurfaces(t *testing.T) {
 	}
 }
 
+func TestPublicRoutesExposeCheckoutConfig(t *testing.T) {
+	setupTestEnv(t)
+
+	publicE := echo.New()
+	RegisterPublicRoutes(publicE)
+
+	for _, path := range []string{"/payments/ezpay/v1/config", "/payments/gmpay/v1/config"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		publicE.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s should be public for checkout, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+
+		resp := parseResp(t, rec)
+		respData, ok := resp["data"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s expected object data, got %T", path, resp["data"])
+		}
+		if _, ok := respData["supported_assets"].([]interface{}); !ok {
+			t.Fatalf("%s expected supported_assets array, got %T", path, respData["supported_assets"])
+		}
+	}
+}
+
 // TestCreateOrderGmpayV1Solana tests the gmpay route with solana network.
 func TestCreateOrderGmpayV1Solana(t *testing.T) {
 	e := setupTestEnv(t)
